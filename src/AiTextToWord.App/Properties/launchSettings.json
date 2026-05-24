@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "AI Text to Word (Package)": {
+      "commandName": "MsixPackage"
+    },
+    "AI Text to Word (Unpackaged)": {
+      "commandName": "Project"
+    }
+  }
+}

@@ -1,0 +1,58 @@
+<Window
+    x:Class="AiTextToWord.App.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Title="AI Text to Word">
+
+    <Grid Padding="24" RowSpacing="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <StackPanel Orientation="Horizontal" Spacing="12">
+            <TextBlock Text="AI Text to Word" Style="{StaticResource TitleTextBlockStyle}" />
+            <TextBlock x:Name="StatusText" VerticalAlignment="Center" Opacity="0.72" />
+        </StackPanel>
+
+        <Grid Grid.Row="1" ColumnSpacing="16">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <Grid RowSpacing="8">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <TextBlock Text="Raw AI text" Style="{StaticResource SubtitleTextBlockStyle}" />
+                <TextBox
+                    x:Name="InputTextBox"
+                    Grid.Row="1"
+                    AcceptsReturn="True"
+                    TextChanged="InputTextBox_TextChanged"
+                    TextWrapping="Wrap"
+                    ScrollViewer.VerticalScrollBarVisibility="Auto" />
+            </Grid>
+
+            <Grid Grid.Column="1" RowSpacing="8">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <TextBlock Text="Cleaned preview" Style="{StaticResource SubtitleTextBlockStyle}" />
+                <ScrollViewer Grid.Row="1">
+                    <StackPanel x:Name="PreviewPanel" Spacing="8" />
+                </ScrollViewer>
+            </Grid>
+        </Grid>
+
+        <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+            <Button Content="Paste" Click="Paste_Click" />
+            <Button Content="Clear" Click="Clear_Click" />
+            <Button Content="Export Word" Click="ExportWord_Click" Style="{StaticResource AccentButtonStyle}" />
+        </StackPanel>
+    </Grid>
+</Window>

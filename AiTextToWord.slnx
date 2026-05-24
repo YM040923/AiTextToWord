@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/AiTextToWord.App/AiTextToWord.App.csproj">
+      <Platform Project="x86" />
+    </Project>
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/AiTextToWord.Core.Tests/AiTextToWord.Core.Tests.csproj" />
+    <Project Path="tests/AiTextToWord.Docx.Tests/AiTextToWord.Docx.Tests.csproj" />
+  </Folder>
+</Solution>
