@@ -38,4 +38,50 @@ public sealed class MarkdownDocumentParserTests
                 Assert.Equal(["First", "Second"], list.Items);
             });
     }
+
+    [Fact]
+    public void Parse_SupportsFirstReleaseBlockTypes()
+    {
+        var parser = new MarkdownDocumentParser();
+
+        var document = parser.Parse("""
+        ## Section
+
+        > Important quote
+
+        1. First step
+        2. Second step
+
+        ---
+
+        ```powershell
+        dotnet test
+        ```
+        """);
+
+        Assert.Collection(document.Blocks,
+            block =>
+            {
+                var heading = Assert.IsType<HeadingBlock>(block);
+                Assert.Equal(2, heading.Level);
+            },
+            block =>
+            {
+                var quote = Assert.IsType<BlockQuoteBlock>(block);
+                Assert.Equal("Important quote", quote.Text);
+            },
+            block =>
+            {
+                var list = Assert.IsType<ListBlock>(block);
+                Assert.True(list.IsOrdered);
+                Assert.Equal(["First step", "Second step"], list.Items);
+            },
+            block => Assert.IsType<DividerBlock>(block),
+            block =>
+            {
+                var code = Assert.IsType<CodeBlock>(block);
+                Assert.Equal("powershell", code.Language);
+                Assert.Equal("dotnet test", code.Code.Trim());
+            });
+    }
 }
