@@ -2,11 +2,31 @@ using AiTextToWord.Core.Markdown;
 using AiTextToWord.Core.Model;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
+using PdfSharp.Pdf.IO;
 
 namespace AiTextToWord.Docx.Tests;
 
 public sealed class DocxExporterTests
 {
+    [Fact]
+    public void PdfExport_CreatesReadablePdf()
+    {
+        var document = new DocumentModel([
+            new HeadingBlock(1, "PDF Export Title"),
+            new ParagraphBlock("A paragraph for PDF export."),
+            new ListBlock(false, ["One", "Two"]),
+            new BlockQuoteBlock("A quote block."),
+            new CodeBlock("csharp", "Console.WriteLine(\"hi\");")
+        ]);
+        using var stream = new MemoryStream();
+
+        new PdfExporter().Export(document, stream, new DocxExportOptions("AI Text Export"));
+
+        stream.Position = 0;
+        using var pdf = PdfReader.Open(stream, PdfDocumentOpenMode.Import);
+        Assert.Equal(1, pdf.PageCount);
+    }
+
     [Fact]
     public void Export_CreatesReadableDocx()
     {

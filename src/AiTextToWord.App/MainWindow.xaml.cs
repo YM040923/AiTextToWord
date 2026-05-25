@@ -30,6 +30,7 @@ public sealed partial class MainWindow : Window
     private static readonly double[] BodyFontSizes = [10.5, 11, 12, 14];
     private static readonly double[] HeadingFontSizes = [16, 18, 20, 22];
     private static readonly double[] LineSpacings = [1.15, 1.3, 1.5, 2.0];
+    private const string ExportFormatSettingKey = "Export.Format";
     private const string PresetSettingKey = "Export.Preset";
     private const string FontSettingKey = "Export.Font";
     private const string BodyFontSizeSettingKey = "Export.BodyFontSize";
@@ -68,6 +69,7 @@ public sealed partial class MainWindow : Window
         isLoadingExportSettings = false;
         SystemBackdrop = new MicaBackdrop();
         UpdateSettingsSummary();
+        UpdateExportButton();
     }
 
     private void InputTextBox_TextChanged(object sender, TextChangedEventArgs e)
@@ -102,7 +104,7 @@ public sealed partial class MainWindow : Window
         StatusText.Text = "已载入示例文本。";
     }
 
-    private async void ExportWord_Click(object sender, RoutedEventArgs e)
+    private async void Export_Click(object sender, RoutedEventArgs e)
     {
         if (currentResult is null || currentResult.Document.Blocks.Count == 0)
         {
@@ -114,7 +116,15 @@ public sealed partial class MainWindow : Window
         {
             SuggestedFileName = "AI文本导出"
         };
-        picker.FileTypeChoices.Add("Word 文档", [".docx"]);
+        if (IsPdfExportSelected())
+        {
+            picker.FileTypeChoices.Add("PDF 文档", [".pdf"]);
+        }
+        else
+        {
+            picker.FileTypeChoices.Add("Word 文档", [".docx"]);
+        }
+
         InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
 
         var file = await picker.PickSaveFileAsync();
@@ -125,8 +135,16 @@ public sealed partial class MainWindow : Window
 
         await using var stream = File.Create(file.Path);
         stream.SetLength(0);
-        new DocxExporter().Export(currentResult.Document, stream, CreateExportOptions());
-        StatusText.Text = "Word 文档已导出。";
+        if (IsPdfExportSelected())
+        {
+            new PdfExporter().Export(currentResult.Document, stream, CreateExportOptions());
+            StatusText.Text = "PDF 文档已导出。";
+        }
+        else
+        {
+            new DocxExporter().Export(currentResult.Document, stream, CreateExportOptions());
+            StatusText.Text = "Word 文档已导出。";
+        }
     }
 
     private void PresetComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -173,6 +191,7 @@ public sealed partial class MainWindow : Window
         }
 
         UpdateSettingsSummary();
+        UpdateExportButton();
         SaveExportSettings();
     }
 
@@ -189,6 +208,7 @@ public sealed partial class MainWindow : Window
         }
 
         UpdateSettingsSummary();
+        UpdateExportButton();
         SaveExportSettings();
     }
 
@@ -233,7 +253,25 @@ public sealed partial class MainWindow : Window
         var font = SelectedFontFamily();
         var bodySize = SelectedDouble(BodyFontSizes, BodyFontSizeComboBox.SelectedIndex, 11);
         var lineSpacing = SelectedDouble(LineSpacings, LineSpacingComboBox.SelectedIndex, 1.3);
-        SettingsSummaryText.Text = $"{preset} · {font} · {bodySize:0.#}pt · {lineSpacing:0.##} 倍行距";
+        SettingsSummaryText.Text = $"{SelectedExportFormatName()} · {preset} · {font} · {bodySize:0.#}pt · {lineSpacing:0.##} 倍行距";
+    }
+
+    private void UpdateExportButton()
+    {
+        if (ExportButtonText is not null)
+        {
+            ExportButtonText.Text = $"导出 {SelectedExportFormatName()}";
+        }
+    }
+
+    private bool IsPdfExportSelected()
+    {
+        return ExportFormatComboBox.SelectedIndex == 1;
+    }
+
+    private string SelectedExportFormatName()
+    {
+        return IsPdfExportSelected() ? "PDF" : "Word";
     }
 
     private void LoadInstalledFonts()
@@ -352,6 +390,7 @@ public sealed partial class MainWindow : Window
     {
         var settings = ApplicationData.Current.LocalSettings.Values;
 
+        ExportFormatComboBox.SelectedIndex = ReadIndexSetting(settings, ExportFormatSettingKey, 0, ExportFormatComboBox.Items.Count);
         PresetComboBox.SelectedIndex = ReadIndexSetting(settings, PresetSettingKey, 0, PresetComboBox.Items.Count);
         BodyFontSizeComboBox.SelectedIndex = ReadIndexSetting(settings, BodyFontSizeSettingKey, 1, BodyFontSizeComboBox.Items.Count);
         HeadingFontSizeComboBox.SelectedIndex = ReadIndexSetting(settings, HeadingFontSizeSettingKey, 2, HeadingFontSizeComboBox.Items.Count);
@@ -375,6 +414,7 @@ public sealed partial class MainWindow : Window
         }
 
         var settings = ApplicationData.Current.LocalSettings.Values;
+        settings[ExportFormatSettingKey] = ExportFormatComboBox.SelectedIndex;
         settings[PresetSettingKey] = PresetComboBox.SelectedIndex;
         settings[FontSettingKey] = SelectedFontFamily();
         settings[BodyFontSizeSettingKey] = BodyFontSizeComboBox.SelectedIndex;
@@ -418,6 +458,8 @@ public sealed partial class MainWindow : Window
     private bool AreExportSettingControlsReady()
     {
         return SettingsSummaryText is not null
+            && ExportFormatComboBox is not null
+            && ExportButtonText is not null
             && PresetComboBox is not null
             && FontSearchBox is not null
             && BodyFontSizeComboBox is not null
