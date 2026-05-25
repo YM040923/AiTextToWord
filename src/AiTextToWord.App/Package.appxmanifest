@@ -9,7 +9,7 @@
   <Identity
     Name="YM040923.AiTextToWord"
     Publisher="CN=YM040923"
-    Version="1.0.0.11" />
+    Version="1.0.0.12" />
 
   <mp:PhoneIdentity PhoneProductId="6f9b09a7-8f6d-4e55-a25d-63eecc29a6fd" PhonePublisherId="00000000-0000-0000-0000-000000000000"/>
 
