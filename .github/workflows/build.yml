@@ -23,7 +23,7 @@ jobs:
         run: dotnet restore AiTextToWord.slnx
 
       - name: Build
-        run: dotnet build AiTextToWord.slnx --configuration Release --no-restore
+        run: dotnet build AiTextToWord.slnx --configuration Release --no-restore /p:PublishReadyToRun=false /p:PublishTrimmed=false
 
       - name: Test
         run: dotnet test AiTextToWord.slnx --configuration Release --no-build
