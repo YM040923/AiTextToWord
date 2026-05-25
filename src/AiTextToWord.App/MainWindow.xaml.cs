@@ -11,6 +11,7 @@ using Microsoft.UI.Windowing;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Documents;
 using Microsoft.UI.Xaml.Media;
 using Windows.ApplicationModel.DataTransfer;
 using Windows.Foundation.Collections;
@@ -91,6 +92,8 @@ public sealed partial class MainWindow : Window
     {
         InputTextBox.Text = string.Empty;
         PreviewPanel.Children.Clear();
+        PreviewScrollViewer.Visibility = Visibility.Collapsed;
+        PreviewPage.Visibility = Visibility.Collapsed;
         EmptyPreviewPanel.Visibility = Visibility.Visible;
         InputMetaText.Text = "等待粘贴内容";
         PreviewMetaText.Text = "暂无文档块";
@@ -192,6 +195,7 @@ public sealed partial class MainWindow : Window
 
         UpdateSettingsSummary();
         UpdateExportButton();
+        RefreshPreview();
         SaveExportSettings();
     }
 
@@ -209,6 +213,7 @@ public sealed partial class MainWindow : Window
 
         UpdateSettingsSummary();
         UpdateExportButton();
+        RefreshPreview();
         SaveExportSettings();
     }
 
@@ -339,6 +344,7 @@ public sealed partial class MainWindow : Window
         {
             UpdateFontSuggestions(sender.Text);
             UpdateSettingsSummary();
+            RefreshPreview();
             SaveExportSettings();
         }
     }
@@ -352,6 +358,7 @@ public sealed partial class MainWindow : Window
 
         sender.Text = font;
         UpdateSettingsSummary();
+        RefreshPreview();
         SaveExportSettings();
     }
 
@@ -367,6 +374,7 @@ public sealed partial class MainWindow : Window
         }
 
         UpdateSettingsSummary();
+        RefreshPreview();
         SaveExportSettings();
     }
 
@@ -480,6 +488,8 @@ public sealed partial class MainWindow : Window
         if (string.IsNullOrWhiteSpace(InputTextBox.Text))
         {
             PreviewPanel.Children.Clear();
+            PreviewScrollViewer.Visibility = Visibility.Collapsed;
+            PreviewPage.Visibility = Visibility.Collapsed;
             EmptyPreviewPanel.Visibility = Visibility.Visible;
             InputMetaText.Text = "等待粘贴内容";
             PreviewMetaText.Text = "暂无文档块";
@@ -498,65 +508,114 @@ public sealed partial class MainWindow : Window
     private void RenderPreview(DocumentModel document)
     {
         PreviewPanel.Children.Clear();
-        EmptyPreviewPanel.Visibility = document.Blocks.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        var hasBlocks = document.Blocks.Count > 0;
+        EmptyPreviewPanel.Visibility = hasBlocks ? Visibility.Collapsed : Visibility.Visible;
+        PreviewScrollViewer.Visibility = hasBlocks ? Visibility.Visible : Visibility.Collapsed;
+        PreviewPage.Visibility = hasBlocks ? Visibility.Visible : Visibility.Collapsed;
+
+        var options = CreateExportOptions();
+        var metrics = PreviewLayoutMetrics.FromExportOptions(options);
+        ApplyPreviewPageLayout(metrics);
 
         foreach (var block in document.Blocks)
         {
-            PreviewPanel.Children.Add(CreatePreviewElement(block));
+            PreviewPanel.Children.Add(CreatePreviewElement(block, metrics, options.FontFamily));
         }
     }
 
-    private static FrameworkElement CreatePreviewElement(DocumentBlock block)
+    private void RefreshPreview()
     {
-        var content = block switch
+        if (currentResult is not null)
         {
-            HeadingBlock heading => PreviewText(heading.Text, heading.Level == 1 ? 22 : heading.Level == 2 ? 18 : 16, FontWeights.SemiBold),
-            ParagraphBlock paragraph => PreviewText(paragraph.Text),
-            BlockQuoteBlock quote => CreateQuotePreview(quote.Text),
-            CodeBlock code => CreateCodePreview(code),
+            RenderPreview(currentResult.Document);
+        }
+    }
+
+    private void ApplyPreviewPageLayout(PreviewLayoutMetrics metrics)
+    {
+        PreviewPage.Padding = new Thickness(metrics.PagePadding);
+    }
+
+    private static FrameworkElement CreatePreviewElement(
+        DocumentBlock block,
+        PreviewLayoutMetrics metrics,
+        string fontFamily)
+    {
+        return block switch
+        {
+            HeadingBlock heading => CreateHeadingPreview(heading, metrics, fontFamily),
+            ParagraphBlock paragraph => CreateParagraphPreview(paragraph, metrics, fontFamily),
+            BlockQuoteBlock quote => CreateQuotePreview(quote, metrics, fontFamily),
+            CodeBlock code => CreateCodePreview(code, metrics),
             DividerBlock => new Border
             {
                 Height = 1,
-                Margin = new Thickness(0, 4, 0, 4),
+                Margin = new Thickness(0, 14, 0, 14),
                 Background = new SolidColorBrush(Microsoft.UI.Colors.Gray),
-                Opacity = 0.28
+                Opacity = 0.36
             },
-            ListBlock list => CreateListPreview(list),
-            _ => PreviewText(string.Empty)
-        };
-
-        return new Border
-        {
-            Padding = new Thickness(14, 12, 14, 12),
-            CornerRadius = new CornerRadius(10),
-            Background = (Brush)Application.Current.Resources["SystemControlBackgroundChromeMediumLowBrush"],
-            Child = content
+            ListBlock list => CreateListPreview(list, metrics, fontFamily),
+            _ => PreviewText(string.Empty, metrics.BodyFontSize, FontWeights.Normal, metrics, fontFamily)
         };
     }
 
-    private static TextBlock PreviewText(string text, double opacity = 1)
+    private static FrameworkElement CreateHeadingPreview(HeadingBlock heading, PreviewLayoutMetrics metrics, string fontFamily)
     {
-        return PreviewText(text, 14, FontWeights.Normal, opacity);
+        var fontSize = heading.Level switch
+        {
+            1 => metrics.Heading1FontSize,
+            2 => metrics.Heading2FontSize,
+            _ => metrics.Heading3FontSize
+        };
+        var text = PreviewText(heading.Text, fontSize, FontWeights.SemiBold, metrics, fontFamily, heading.Inlines);
+        text.Margin = heading.Level == 1 ? new Thickness(0, 0, 0, 14) : new Thickness(0, 12, 0, 8);
+        return text;
     }
 
-    private static TextBlock PreviewText(string text, double fontSize, FontWeight fontWeight, double opacity = 1)
+    private static FrameworkElement CreateParagraphPreview(ParagraphBlock paragraph, PreviewLayoutMetrics metrics, string fontFamily)
     {
-        return new TextBlock
+        var text = PreviewText(paragraph.Text, metrics.BodyFontSize, FontWeights.Normal, metrics, fontFamily, paragraph.Inlines);
+        text.Margin = new Thickness(0, 0, 0, 10);
+        return text;
+    }
+
+    private static TextBlock PreviewText(
+        string text,
+        double fontSize,
+        FontWeight fontWeight,
+        PreviewLayoutMetrics metrics,
+        string fontFamily,
+        IReadOnlyList<DocumentInline>? inlines = null,
+        double opacity = 1)
+    {
+        var textBlock = new TextBlock
         {
-            Text = text,
             FontSize = fontSize,
             FontWeight = fontWeight,
+            FontFamily = new FontFamily(fontFamily),
+            Foreground = new SolidColorBrush(Microsoft.UI.Colors.Black),
+            LineHeight = Math.Max(metrics.LineHeight, fontSize * 1.15),
+            LineStackingStrategy = LineStackingStrategy.BlockLineHeight,
             Opacity = opacity,
             TextWrapping = TextWrapping.Wrap
         };
+        AppendPreviewInlines(textBlock, text, inlines);
+        return textBlock;
     }
 
-    private static FrameworkElement CreateQuotePreview(string text)
+    private static FrameworkElement CreateQuotePreview(BlockQuoteBlock quote, PreviewLayoutMetrics metrics, string fontFamily)
     {
-        var quoteText = PreviewText(text, 0.78);
+        var quoteText = PreviewText(
+            quote.Text,
+            metrics.BodyFontSize,
+            FontWeights.Normal,
+            metrics,
+            fontFamily,
+            quote.Inlines,
+            opacity: 0.78);
         Grid.SetColumn(quoteText, 1);
 
-        return new Grid
+        var grid = new Grid
         {
             ColumnDefinitions =
             {
@@ -575,9 +634,18 @@ public sealed partial class MainWindow : Window
                 quoteText
             }
         };
+
+        return new Border
+        {
+            Margin = new Thickness(0, 4, 0, 14),
+            Padding = metrics.UseGrayQuoteBlock ? new Thickness(12, 10, 12, 10) : new Thickness(0),
+            Background = metrics.UseGrayQuoteBlock ? new SolidColorBrush(Windows.UI.Color.FromArgb(255, 246, 247, 249)) : null,
+            CornerRadius = new CornerRadius(4),
+            Child = grid
+        };
     }
 
-    private static FrameworkElement CreateCodePreview(CodeBlock code)
+    private static FrameworkElement CreateCodePreview(CodeBlock code, PreviewLayoutMetrics metrics)
     {
         var panel = new StackPanel { Spacing = 8 };
 
@@ -585,8 +653,9 @@ public sealed partial class MainWindow : Window
         {
             panel.Children.Add(new TextBlock
             {
-                        Text = code.Language,
+                Text = code.Language,
                 FontSize = 12,
+                Foreground = new SolidColorBrush(Microsoft.UI.Colors.DimGray),
                 Opacity = 0.62
             });
         }
@@ -596,15 +665,29 @@ public sealed partial class MainWindow : Window
             Text = code.Code,
             FontFamily = new FontFamily("Cascadia Mono, Consolas"),
             FontSize = 13,
+            Foreground = new SolidColorBrush(Microsoft.UI.Colors.Black),
+            LineHeight = Math.Max(metrics.LineHeight, 16),
+            LineStackingStrategy = LineStackingStrategy.BlockLineHeight,
             TextWrapping = TextWrapping.NoWrap
         });
 
-        return panel;
+        return new Border
+        {
+            Margin = new Thickness(0, 4, 0, 14),
+            Padding = new Thickness(12),
+            Background = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 246, 247, 249)),
+            CornerRadius = new CornerRadius(4),
+            Child = panel
+        };
     }
 
-    private static FrameworkElement CreateListPreview(ListBlock list)
+    private static FrameworkElement CreateListPreview(ListBlock list, PreviewLayoutMetrics metrics, string fontFamily)
     {
-        var panel = new StackPanel { Spacing = 6 };
+        var panel = new StackPanel
+        {
+            Spacing = metrics.ListItemSpacing,
+            Margin = new Thickness(0, 0, 0, 10)
+        };
 
         for (var index = 0; index < list.Items.Count; index++)
         {
@@ -615,10 +698,21 @@ public sealed partial class MainWindow : Window
             var marker = new TextBlock
             {
                 Text = list.IsOrdered ? $"{index + 1}." : "-",
+                FontFamily = new FontFamily(fontFamily),
+                FontSize = metrics.BodyFontSize,
+                Foreground = new SolidColorBrush(Microsoft.UI.Colors.Black),
+                LineHeight = metrics.LineHeight,
+                LineStackingStrategy = LineStackingStrategy.BlockLineHeight,
                 Opacity = 0.68,
-                MinWidth = 20
+                MinWidth = 28
             };
-            var text = PreviewText(list.Items[index]);
+            var text = PreviewText(
+                list.Items[index],
+                metrics.BodyFontSize,
+                FontWeights.Normal,
+                metrics,
+                fontFamily,
+                list.ItemInlines is not null && index < list.ItemInlines.Count ? list.ItemInlines[index] : null);
             Grid.SetColumn(text, 1);
 
             row.Children.Add(marker);
@@ -627,5 +721,47 @@ public sealed partial class MainWindow : Window
         }
 
         return panel;
+    }
+
+    private static void AppendPreviewInlines(
+        TextBlock textBlock,
+        string fallbackText,
+        IReadOnlyList<DocumentInline>? inlines)
+    {
+        if (inlines is null || inlines.Count == 0)
+        {
+            textBlock.Text = fallbackText;
+            return;
+        }
+
+        foreach (var inline in inlines)
+        {
+            switch (inline)
+            {
+                case TextInline text:
+                    textBlock.Inlines.Add(new Run { Text = text.Text });
+                    break;
+                case BoldInline bold:
+                    textBlock.Inlines.Add(new Microsoft.UI.Xaml.Documents.Bold
+                    {
+                        Inlines = { new Run { Text = bold.Text } }
+                    });
+                    break;
+                case ItalicInline italic:
+                    textBlock.Inlines.Add(new Italic
+                    {
+                        Inlines = { new Run { Text = italic.Text } }
+                    });
+                    break;
+                case CodeInline code:
+                    textBlock.Inlines.Add(new Run
+                    {
+                        Text = code.Text,
+                        FontFamily = new FontFamily("Cascadia Mono, Consolas"),
+                        Foreground = new SolidColorBrush(Microsoft.UI.Colors.DarkSlateGray)
+                    });
+                    break;
+            }
+        }
     }
 }

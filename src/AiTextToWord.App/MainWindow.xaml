@@ -392,7 +392,7 @@
 
                 <Border
                     Grid.Column="1"
-                    Padding="16"
+                    Padding="0"
                     Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                     BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                     BorderThickness="1"
@@ -403,7 +403,7 @@
                             <RowDefinition Height="*" />
                         </Grid.RowDefinitions>
 
-                        <Grid ColumnSpacing="10">
+                        <Grid Padding="16,16,16,0" ColumnSpacing="10">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="*" />
@@ -455,10 +455,26 @@
                                     TextWrapping="Wrap" />
                             </StackPanel>
 
-                            <ScrollViewer>
-                                <StackPanel
-                                    x:Name="PreviewPanel"
-                                    Spacing="10" />
+                            <ScrollViewer
+                                x:Name="PreviewScrollViewer"
+                                Padding="24"
+                                Background="{ThemeResource SystemControlBackgroundChromeMediumLowBrush}"
+                                HorizontalScrollBarVisibility="Disabled"
+                                VerticalScrollBarVisibility="Auto"
+                                Visibility="Collapsed">
+                                <Border
+                                    x:Name="PreviewPage"
+                                    Width="620"
+                                    MinHeight="876"
+                                    HorizontalAlignment="Center"
+                                    Background="White"
+                                    BorderBrush="#18000000"
+                                    BorderThickness="1"
+                                    CornerRadius="2"
+                                    Padding="56"
+                                    Visibility="Collapsed">
+                                    <StackPanel x:Name="PreviewPanel" />
+                                </Border>
                             </ScrollViewer>
                         </Grid>
                     </Grid>

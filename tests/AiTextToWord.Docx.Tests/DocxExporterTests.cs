@@ -9,6 +9,29 @@ namespace AiTextToWord.Docx.Tests;
 public sealed class DocxExporterTests
 {
     [Fact]
+    public void PreviewLayoutMetrics_FromExportOptions_ReflectsPageAndTypographySettings()
+    {
+        var metrics = PreviewLayoutMetrics.FromExportOptions(
+            new DocxExportOptions("Preview")
+            {
+                BodyFontSize = 12,
+                HeadingFontSize = 22,
+                LineSpacing = 1.5,
+                PageMargin = DocxPageMargin.Wide,
+                QuoteStyle = DocxQuoteStyle.GrayBlock,
+                ListDensity = DocxListDensity.Comfortable
+            });
+
+        Assert.Equal(12, metrics.BodyFontSize);
+        Assert.Equal(22, metrics.Heading1FontSize);
+        Assert.Equal(18, metrics.Heading3FontSize);
+        Assert.Equal(18, metrics.LineHeight);
+        Assert.Equal(72, metrics.PagePadding);
+        Assert.Equal(6, metrics.ListItemSpacing);
+        Assert.True(metrics.UseGrayQuoteBlock);
+    }
+
+    [Fact]
     public void PdfExport_CreatesReadablePdf()
     {
         var document = new DocumentModel([
