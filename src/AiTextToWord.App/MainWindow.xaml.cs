@@ -1,4 +1,5 @@
 using AiTextToWord.Core.Conversion;
+using AiTextToWord.Core.Export;
 using AiTextToWord.Core.Fonts;
 using AiTextToWord.Core.Model;
 using AiTextToWord.Docx;
@@ -40,6 +41,7 @@ public sealed partial class MainWindow : Window
     private const string PageMarginSettingKey = "Export.PageMargin";
     private const string QuoteStyleSettingKey = "Export.QuoteStyle";
     private const string ListDensitySettingKey = "Export.ListDensity";
+    private const string LastExportFolderSettingKey = "Export.LastFolder";
     private const string SampleText = """
         # AI 文本整理示例
 
@@ -117,7 +119,9 @@ public sealed partial class MainWindow : Window
 
         var picker = new FileSavePicker
         {
-            SuggestedFileName = "AI文本导出"
+            SettingsIdentifier = ExportLocationMemory.PickerSettingsIdentifier,
+            SuggestedFileName = "AI文本导出",
+            SuggestedStartLocation = PickerLocationId.DocumentsLibrary
         };
         if (IsPdfExportSelected())
         {
@@ -141,13 +145,14 @@ public sealed partial class MainWindow : Window
         if (IsPdfExportSelected())
         {
             new PdfExporter().Export(currentResult.Document, stream, CreateExportOptions());
-            StatusText.Text = "PDF 文档已导出。";
         }
         else
         {
             new DocxExporter().Export(currentResult.Document, stream, CreateExportOptions());
-            StatusText.Text = "Word 文档已导出。";
         }
+
+        SaveLastExportFolder(file.Path);
+        StatusText.Text = $"{SelectedExportFormatName()} 文档已导出：{file.Name}";
     }
 
     private void PresetComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -431,6 +436,15 @@ public sealed partial class MainWindow : Window
         settings[PageMarginSettingKey] = PageMarginComboBox.SelectedIndex;
         settings[QuoteStyleSettingKey] = QuoteStyleComboBox.SelectedIndex;
         settings[ListDensitySettingKey] = ListDensityComboBox.SelectedIndex;
+    }
+
+    private static void SaveLastExportFolder(string filePath)
+    {
+        var folderPath = ExportLocationMemory.ParentFolderFromFilePath(filePath);
+        if (folderPath is not null)
+        {
+            ApplicationData.Current.LocalSettings.Values[LastExportFolderSettingKey] = folderPath;
+        }
     }
 
     private static int ReadIndexSetting(
