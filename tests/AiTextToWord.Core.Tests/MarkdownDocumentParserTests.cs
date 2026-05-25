@@ -84,4 +84,88 @@ public sealed class MarkdownDocumentParserTests
                 Assert.Equal("dotnet test", code.Code.Trim());
             });
     }
+
+    [Fact]
+    public void Parse_StripsCommonInlineMarkdownMarkersFromAiChatText()
+    {
+        var parser = new MarkdownDocumentParser();
+
+        var document = parser.Parse("""
+        ### 第三步：拿“中央主内容区（Main Content / 列表与卡片）”开刀 ###
+
+        > **【复制这条给 AI】**
+        > 请使用 `cc-haha` 打开 [项目](https://example.com)。
+
+        * **无界整体感**：取消导航栏与右侧主内容区之间的实体分割线。
+
+        1. **提取逻辑**：请先通读 `Sidebar.vue`。
+        """);
+
+        Assert.Collection(document.Blocks,
+            block =>
+            {
+                var heading = Assert.IsType<HeadingBlock>(block);
+                Assert.Equal(3, heading.Level);
+                Assert.Equal("第三步：拿“中央主内容区（Main Content / 列表与卡片）”开刀", heading.Text);
+            },
+            block =>
+            {
+                var quote = Assert.IsType<BlockQuoteBlock>(block);
+                Assert.Equal("【复制这条给 AI】 请使用 cc-haha 打开 项目。", quote.Text);
+                var inlines = Assert.IsAssignableFrom<IReadOnlyList<DocumentInline>>(quote.Inlines);
+                Assert.Contains(inlines, inline => inline is BoldInline { Text: "【复制这条给 AI】" });
+                Assert.Contains(inlines, inline => inline is CodeInline { Text: "cc-haha" });
+            },
+            block =>
+            {
+                var list = Assert.IsType<ListBlock>(block);
+                Assert.False(list.IsOrdered);
+                Assert.Equal(["无界整体感：取消导航栏与右侧主内容区之间的实体分割线。"], list.Items);
+            },
+            block =>
+            {
+                var list = Assert.IsType<ListBlock>(block);
+                Assert.True(list.IsOrdered);
+                Assert.Equal(["提取逻辑：请先通读 Sidebar.vue。"], list.Items);
+            });
+    }
+
+    [Fact]
+    public void Parse_ParsesQuotedAiInstructionsIntoStructuredBlocks()
+    {
+        var parser = new MarkdownDocumentParser();
+
+        var document = parser.Parse("""
+        > 请按照以下**“现代沉浸式”**蓝图重构这个页面：
+        > **1. 全屏动态毛玻璃背景（沉浸感的核心）**：
+        > 废弃原本死板的纯色背景。请使用 `filter: blur(80px) saturate(200%)`。
+        > **2. 现代左右双栏布局（Flex/Grid）**：
+        > * **左栏（视觉焦点）**：展示一张**极其巨大**的专辑封面。
+        > * **右栏（沉浸式歌词）**：**正在播放的当前行歌词**必须加粗。
+        """);
+
+        Assert.Collection(document.Blocks,
+            block =>
+            {
+                var quote = Assert.IsType<BlockQuoteBlock>(block);
+                Assert.Equal("请按照以下“现代沉浸式”蓝图重构这个页面： 1. 全屏动态毛玻璃背景（沉浸感的核心）： 废弃原本死板的纯色背景。请使用 filter: blur(80px) saturate(200%)。 2. 现代左右双栏布局（Flex/Grid）：", quote.Text);
+                var inlines = Assert.IsAssignableFrom<IReadOnlyList<DocumentInline>>(quote.Inlines);
+                Assert.Contains(inlines, inline => inline is BoldInline { Text: "“现代沉浸式”" });
+                Assert.Contains(inlines, inline => inline is BoldInline { Text: "1. 全屏动态毛玻璃背景（沉浸感的核心）" });
+                Assert.Contains(inlines, inline => inline is CodeInline { Text: "filter: blur(80px) saturate(200%)" });
+                Assert.Contains(inlines, inline => inline is BoldInline { Text: "2. 现代左右双栏布局（Flex/Grid）" });
+            },
+            block =>
+            {
+                var list = Assert.IsType<ListBlock>(block);
+                Assert.Equal([
+                    "左栏（视觉焦点）：展示一张极其巨大的专辑封面。",
+                    "右栏（沉浸式歌词）：正在播放的当前行歌词必须加粗。"
+                ], list.Items);
+                var itemInlines = Assert.IsAssignableFrom<IReadOnlyList<IReadOnlyList<DocumentInline>>>(list.ItemInlines);
+                Assert.Contains(itemInlines[0], inline => inline is BoldInline { Text: "左栏（视觉焦点）" });
+                Assert.Contains(itemInlines[0], inline => inline is BoldInline { Text: "极其巨大" });
+                Assert.Contains(itemInlines[1], inline => inline is BoldInline { Text: "正在播放的当前行歌词" });
+            });
+    }
 }

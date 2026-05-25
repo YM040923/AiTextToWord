@@ -1,16 +1,22 @@
 using AiTextToWord.Core.Conversion;
+using AiTextToWord.Core.Fonts;
 using AiTextToWord.Core.Model;
 using AiTextToWord.Docx;
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices.WindowsRuntime;
+using Microsoft.UI.Windowing;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Windows.ApplicationModel.DataTransfer;
+using Windows.Foundation.Collections;
+using Windows.Storage;
 using Windows.Storage.Pickers;
+using Windows.UI.Text;
 using WinRT.Interop;
 
 namespace AiTextToWord.App;
@@ -19,10 +25,49 @@ public sealed partial class MainWindow : Window
 {
     private readonly TextConversionService conversionService = TextConversionService.CreateDefault();
     private ConversionResult? currentResult;
+    private IReadOnlyList<string> installedFonts = [];
+    private bool isLoadingExportSettings;
+    private static readonly double[] BodyFontSizes = [10.5, 11, 12, 14];
+    private static readonly double[] HeadingFontSizes = [16, 18, 20, 22];
+    private static readonly double[] LineSpacings = [1.15, 1.3, 1.5, 2.0];
+    private const string PresetSettingKey = "Export.Preset";
+    private const string FontSettingKey = "Export.Font";
+    private const string BodyFontSizeSettingKey = "Export.BodyFontSize";
+    private const string HeadingFontSizeSettingKey = "Export.HeadingFontSize";
+    private const string LineSpacingSettingKey = "Export.LineSpacing";
+    private const string PageMarginSettingKey = "Export.PageMargin";
+    private const string QuoteStyleSettingKey = "Export.QuoteStyle";
+    private const string ListDensitySettingKey = "Export.ListDensity";
+    private const string SampleText = """
+        # AI 文本整理示例
+
+        这是一段从 AI 对话中复制出来的 Markdown 内容。它包含**加粗文字**、`行内代码`、列表和引用块。
+
+        ## 可以识别的结构
+
+        - 标题会变成 Word 标题样式
+        - 列表会保持项目符号
+        - 引用会整理成独立段落
+
+        > 这是一段引用内容，适合放提示词、说明、摘录或 AI 给出的重点结论。
+
+        ```csharp
+        Console.WriteLine("Hello, Word");
+        ```
+
+        你可以修改导出设置，然后导出 Word 查看效果。
+        """;
 
     public MainWindow()
     {
         InitializeComponent();
+        isLoadingExportSettings = true;
+        ConfigureWindowChrome();
+        LoadInstalledFonts();
+        LoadExportSettings();
+        isLoadingExportSettings = false;
+        SystemBackdrop = new MicaBackdrop();
+        UpdateSettingsSummary();
     }
 
     private void InputTextBox_TextChanged(object sender, TextChangedEventArgs e)
@@ -36,6 +81,7 @@ public sealed partial class MainWindow : Window
         if (package.Contains(StandardDataFormats.Text))
         {
             InputTextBox.Text = await package.GetTextAsync();
+            StatusText.Text = "已粘贴剪贴板文本。";
         }
     }
 
@@ -43,23 +89,32 @@ public sealed partial class MainWindow : Window
     {
         InputTextBox.Text = string.Empty;
         PreviewPanel.Children.Clear();
-        StatusText.Text = string.Empty;
+        EmptyPreviewPanel.Visibility = Visibility.Visible;
+        InputMetaText.Text = "等待粘贴内容";
+        PreviewMetaText.Text = "暂无文档块";
+        StatusText.Text = "就绪";
         currentResult = null;
+    }
+
+    private void Sample_Click(object sender, RoutedEventArgs e)
+    {
+        InputTextBox.Text = SampleText;
+        StatusText.Text = "已载入示例文本。";
     }
 
     private async void ExportWord_Click(object sender, RoutedEventArgs e)
     {
         if (currentResult is null || currentResult.Document.Blocks.Count == 0)
         {
-            StatusText.Text = "Paste text before exporting.";
+            StatusText.Text = "请先粘贴文本再导出。";
             return;
         }
 
         var picker = new FileSavePicker
         {
-            SuggestedFileName = "ai-text-export"
+            SuggestedFileName = "AI文本导出"
         };
-        picker.FileTypeChoices.Add("Word document", [".docx"]);
+        picker.FileTypeChoices.Add("Word 文档", [".docx"]);
         InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
 
         var file = await picker.PickSaveFileAsync();
@@ -70,8 +125,312 @@ public sealed partial class MainWindow : Window
 
         await using var stream = File.Create(file.Path);
         stream.SetLength(0);
-        new DocxExporter().Export(currentResult.Document, stream, new DocxExportOptions("AI Text Export"));
-        StatusText.Text = "Exported Word document.";
+        new DocxExporter().Export(currentResult.Document, stream, CreateExportOptions());
+        StatusText.Text = "Word 文档已导出。";
+    }
+
+    private void PresetComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!AreExportSettingControlsReady())
+        {
+            return;
+        }
+
+        if (isLoadingExportSettings)
+        {
+            return;
+        }
+
+        switch (PresetComboBox.SelectedIndex)
+        {
+            case 1:
+                SelectPreferredFont();
+                BodyFontSizeComboBox.SelectedIndex = 0;
+                HeadingFontSizeComboBox.SelectedIndex = 0;
+                LineSpacingComboBox.SelectedIndex = 0;
+                PageMarginComboBox.SelectedIndex = 0;
+                QuoteStyleComboBox.SelectedIndex = 0;
+                ListDensityComboBox.SelectedIndex = 0;
+                break;
+            case 2:
+                SelectPreferredFont();
+                BodyFontSizeComboBox.SelectedIndex = 2;
+                HeadingFontSizeComboBox.SelectedIndex = 3;
+                LineSpacingComboBox.SelectedIndex = 2;
+                PageMarginComboBox.SelectedIndex = 2;
+                QuoteStyleComboBox.SelectedIndex = 1;
+                ListDensityComboBox.SelectedIndex = 1;
+                break;
+            default:
+                SelectPreferredFont();
+                BodyFontSizeComboBox.SelectedIndex = 1;
+                HeadingFontSizeComboBox.SelectedIndex = 2;
+                LineSpacingComboBox.SelectedIndex = 1;
+                PageMarginComboBox.SelectedIndex = 1;
+                QuoteStyleComboBox.SelectedIndex = 0;
+                ListDensityComboBox.SelectedIndex = 0;
+                break;
+        }
+
+        UpdateSettingsSummary();
+        SaveExportSettings();
+    }
+
+    private void ExportSettings_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        if (!AreExportSettingControlsReady())
+        {
+            return;
+        }
+
+        if (isLoadingExportSettings)
+        {
+            return;
+        }
+
+        UpdateSettingsSummary();
+        SaveExportSettings();
+    }
+
+    private DocxExportOptions CreateExportOptions()
+    {
+        return new DocxExportOptions("AI Text Export")
+        {
+            Preset = PresetComboBox.SelectedIndex switch
+            {
+                1 => DocxStylePreset.CompactNotes,
+                2 => DocxStylePreset.FormalReport,
+                _ => DocxStylePreset.StandardDocument
+            },
+            FontFamily = SelectedFontFamily(),
+            BodyFontSize = SelectedDouble(BodyFontSizes, BodyFontSizeComboBox.SelectedIndex, 11),
+            HeadingFontSize = SelectedDouble(HeadingFontSizes, HeadingFontSizeComboBox.SelectedIndex, 20),
+            LineSpacing = SelectedDouble(LineSpacings, LineSpacingComboBox.SelectedIndex, 1.3),
+            PageMargin = PageMarginComboBox.SelectedIndex switch
+            {
+                0 => DocxPageMargin.Narrow,
+                2 => DocxPageMargin.Wide,
+                _ => DocxPageMargin.Standard
+            },
+            QuoteStyle = QuoteStyleComboBox.SelectedIndex == 1 ? DocxQuoteStyle.GrayBlock : DocxQuoteStyle.Indented,
+            ListDensity = ListDensityComboBox.SelectedIndex == 1 ? DocxListDensity.Comfortable : DocxListDensity.Compact
+        };
+    }
+
+    private void UpdateSettingsSummary()
+    {
+        if (!AreExportSettingControlsReady())
+        {
+            return;
+        }
+
+        var preset = PresetComboBox.SelectedIndex switch
+        {
+            1 => "紧凑笔记",
+            2 => "正式报告",
+            _ => "标准文档"
+        };
+        var font = SelectedFontFamily();
+        var bodySize = SelectedDouble(BodyFontSizes, BodyFontSizeComboBox.SelectedIndex, 11);
+        var lineSpacing = SelectedDouble(LineSpacings, LineSpacingComboBox.SelectedIndex, 1.3);
+        SettingsSummaryText.Text = $"{preset} · {font} · {bodySize:0.#}pt · {lineSpacing:0.##} 倍行距";
+    }
+
+    private void LoadInstalledFonts()
+    {
+        installedFonts = InstalledFontProvider.GetInstalledFontFamilies();
+        UpdateFontSuggestions(string.Empty);
+        SelectPreferredFont();
+    }
+
+    private void SelectPreferredFont()
+    {
+        var preferredFont = FindPreferredFont();
+        if (!string.IsNullOrWhiteSpace(preferredFont))
+        {
+            FontSearchBox.Text = preferredFont;
+        }
+    }
+
+    private string SelectedFontFamily()
+    {
+        var typedFont = FontSearchBox.Text.Trim();
+        if (!string.IsNullOrWhiteSpace(typedFont))
+        {
+            return FindInstalledFont(typedFont) ?? typedFont;
+        }
+
+        return FindPreferredFont() ?? "Microsoft YaHei";
+    }
+
+    private string? FindPreferredFont()
+    {
+        string[] preferredFonts =
+        [
+            "微软雅黑",
+            "Microsoft YaHei",
+            "Microsoft YaHei UI",
+            "等线",
+            "DengXian",
+            "宋体",
+            "SimSun",
+            "Arial"
+        ];
+
+        foreach (var preferredFont in preferredFonts)
+        {
+            var match = installedFonts.FirstOrDefault(font =>
+                string.Equals(font, preferredFont, StringComparison.CurrentCultureIgnoreCase));
+            if (!string.IsNullOrWhiteSpace(match))
+            {
+                return match;
+            }
+        }
+
+        return installedFonts.FirstOrDefault();
+    }
+
+    private void FontSearchBox_TextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args)
+    {
+        if (!AreExportSettingControlsReady())
+        {
+            return;
+        }
+
+        if (args.Reason == AutoSuggestionBoxTextChangeReason.UserInput)
+        {
+            UpdateFontSuggestions(sender.Text);
+            UpdateSettingsSummary();
+            SaveExportSettings();
+        }
+    }
+
+    private void FontSearchBox_SuggestionChosen(AutoSuggestBox sender, AutoSuggestBoxSuggestionChosenEventArgs args)
+    {
+        if (args.SelectedItem is not string font)
+        {
+            return;
+        }
+
+        sender.Text = font;
+        UpdateSettingsSummary();
+        SaveExportSettings();
+    }
+
+    private void FontSearchBox_QuerySubmitted(AutoSuggestBox sender, AutoSuggestBoxQuerySubmittedEventArgs args)
+    {
+        var font = args.ChosenSuggestion as string
+            ?? FontFamilySearch.Filter(installedFonts, args.QueryText, 1).FirstOrDefault()
+            ?? FindPreferredFont();
+
+        if (!string.IsNullOrWhiteSpace(font))
+        {
+            sender.Text = font;
+        }
+
+        UpdateSettingsSummary();
+        SaveExportSettings();
+    }
+
+    private void UpdateFontSuggestions(string query)
+    {
+        FontSearchBox.ItemsSource = FontFamilySearch.Filter(installedFonts, query);
+    }
+
+    private string? FindInstalledFont(string? fontName)
+    {
+        if (string.IsNullOrWhiteSpace(fontName))
+        {
+            return null;
+        }
+
+        return installedFonts.FirstOrDefault(font =>
+            string.Equals(font, fontName.Trim(), StringComparison.CurrentCultureIgnoreCase));
+    }
+
+    private void LoadExportSettings()
+    {
+        var settings = ApplicationData.Current.LocalSettings.Values;
+
+        PresetComboBox.SelectedIndex = ReadIndexSetting(settings, PresetSettingKey, 0, PresetComboBox.Items.Count);
+        BodyFontSizeComboBox.SelectedIndex = ReadIndexSetting(settings, BodyFontSizeSettingKey, 1, BodyFontSizeComboBox.Items.Count);
+        HeadingFontSizeComboBox.SelectedIndex = ReadIndexSetting(settings, HeadingFontSizeSettingKey, 2, HeadingFontSizeComboBox.Items.Count);
+        LineSpacingComboBox.SelectedIndex = ReadIndexSetting(settings, LineSpacingSettingKey, 1, LineSpacingComboBox.Items.Count);
+        PageMarginComboBox.SelectedIndex = ReadIndexSetting(settings, PageMarginSettingKey, 1, PageMarginComboBox.Items.Count);
+        QuoteStyleComboBox.SelectedIndex = ReadIndexSetting(settings, QuoteStyleSettingKey, 0, QuoteStyleComboBox.Items.Count);
+        ListDensityComboBox.SelectedIndex = ReadIndexSetting(settings, ListDensitySettingKey, 0, ListDensityComboBox.Items.Count);
+
+        if (settings.TryGetValue(FontSettingKey, out var value) && value is string savedFont)
+        {
+            FontSearchBox.Text = FindInstalledFont(savedFont) ?? savedFont;
+            UpdateFontSuggestions(FontSearchBox.Text);
+        }
+    }
+
+    private void SaveExportSettings()
+    {
+        if (isLoadingExportSettings || !AreExportSettingControlsReady())
+        {
+            return;
+        }
+
+        var settings = ApplicationData.Current.LocalSettings.Values;
+        settings[PresetSettingKey] = PresetComboBox.SelectedIndex;
+        settings[FontSettingKey] = SelectedFontFamily();
+        settings[BodyFontSizeSettingKey] = BodyFontSizeComboBox.SelectedIndex;
+        settings[HeadingFontSizeSettingKey] = HeadingFontSizeComboBox.SelectedIndex;
+        settings[LineSpacingSettingKey] = LineSpacingComboBox.SelectedIndex;
+        settings[PageMarginSettingKey] = PageMarginComboBox.SelectedIndex;
+        settings[QuoteStyleSettingKey] = QuoteStyleComboBox.SelectedIndex;
+        settings[ListDensitySettingKey] = ListDensityComboBox.SelectedIndex;
+    }
+
+    private static int ReadIndexSetting(
+        IPropertySet settings,
+        string key,
+        int fallback,
+        int itemCount)
+    {
+        if (!settings.TryGetValue(key, out var value) || value is not int index)
+        {
+            return fallback;
+        }
+
+        return index >= 0 && index < itemCount ? index : fallback;
+    }
+
+    private void ConfigureWindowChrome()
+    {
+        ExtendsContentIntoTitleBar = true;
+        SetTitleBar(TitleBarDragRegion);
+
+        var windowHandle = WindowNative.GetWindowHandle(this);
+        var windowId = Microsoft.UI.Win32Interop.GetWindowIdFromWindow(windowHandle);
+        var appWindow = AppWindow.GetFromWindowId(windowId);
+        appWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico"));
+
+        appWindow.TitleBar.ButtonBackgroundColor = Microsoft.UI.Colors.Transparent;
+        appWindow.TitleBar.ButtonInactiveBackgroundColor = Microsoft.UI.Colors.Transparent;
+        appWindow.TitleBar.ButtonHoverBackgroundColor = Windows.UI.Color.FromArgb(24, 0, 0, 0);
+        appWindow.TitleBar.ButtonPressedBackgroundColor = Windows.UI.Color.FromArgb(36, 0, 0, 0);
+    }
+
+    private bool AreExportSettingControlsReady()
+    {
+        return SettingsSummaryText is not null
+            && PresetComboBox is not null
+            && FontSearchBox is not null
+            && BodyFontSizeComboBox is not null
+            && HeadingFontSizeComboBox is not null
+            && LineSpacingComboBox is not null
+            && PageMarginComboBox is not null
+            && QuoteStyleComboBox is not null
+            && ListDensityComboBox is not null;
+    }
+
+    private static double SelectedDouble(double[] values, int index, double fallback)
+    {
+        return index >= 0 && index < values.Length ? values[index] : fallback;
     }
 
     private void ConvertInput()
@@ -79,19 +438,25 @@ public sealed partial class MainWindow : Window
         if (string.IsNullOrWhiteSpace(InputTextBox.Text))
         {
             PreviewPanel.Children.Clear();
-            StatusText.Text = string.Empty;
+            EmptyPreviewPanel.Visibility = Visibility.Visible;
+            InputMetaText.Text = "等待粘贴内容";
+            PreviewMetaText.Text = "暂无文档块";
+            StatusText.Text = "就绪";
             currentResult = null;
             return;
         }
 
         currentResult = conversionService.Convert(InputTextBox.Text);
         RenderPreview(currentResult.Document);
-        StatusText.Text = $"{currentResult.Document.Blocks.Count} blocks ready";
+        InputMetaText.Text = $"{InputTextBox.Text.Length:N0} 个字符";
+        PreviewMetaText.Text = $"{currentResult.Document.Blocks.Count} 个文档块";
+        StatusText.Text = $"{currentResult.Document.Blocks.Count} 个文档块已就绪";
     }
 
     private void RenderPreview(DocumentModel document)
     {
         PreviewPanel.Children.Clear();
+        EmptyPreviewPanel.Visibility = document.Blocks.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
 
         foreach (var block in document.Blocks)
         {
@@ -101,37 +466,124 @@ public sealed partial class MainWindow : Window
 
     private static FrameworkElement CreatePreviewElement(DocumentBlock block)
     {
-        return block switch
+        var content = block switch
         {
-            HeadingBlock heading => new TextBlock
-            {
-                Text = heading.Text,
-                FontSize = heading.Level == 1 ? 24 : heading.Level == 2 ? 20 : 17,
-                FontWeight = FontWeights.SemiBold,
-                TextWrapping = TextWrapping.Wrap
-            },
+            HeadingBlock heading => PreviewText(heading.Text, heading.Level == 1 ? 22 : heading.Level == 2 ? 18 : 16, FontWeights.SemiBold),
             ParagraphBlock paragraph => PreviewText(paragraph.Text),
-            BlockQuoteBlock quote => PreviewText(quote.Text, 0.72),
-            CodeBlock code => new TextBox
+            BlockQuoteBlock quote => CreateQuotePreview(quote.Text),
+            CodeBlock code => CreateCodePreview(code),
+            DividerBlock => new Border
             {
-                Text = code.Code,
-                FontFamily = new FontFamily("Consolas"),
-                IsReadOnly = true,
-                TextWrapping = TextWrapping.NoWrap
+                Height = 1,
+                Margin = new Thickness(0, 4, 0, 4),
+                Background = new SolidColorBrush(Microsoft.UI.Colors.Gray),
+                Opacity = 0.28
             },
-            DividerBlock => new Border { Height = 1, Opacity = 0.3 },
-            ListBlock list => PreviewText(string.Join(Environment.NewLine, list.Items.Select(item => $"{(list.IsOrdered ? "1." : "-")} {item}"))),
+            ListBlock list => CreateListPreview(list),
             _ => PreviewText(string.Empty)
+        };
+
+        return new Border
+        {
+            Padding = new Thickness(14, 12, 14, 12),
+            CornerRadius = new CornerRadius(10),
+            Background = (Brush)Application.Current.Resources["SystemControlBackgroundChromeMediumLowBrush"],
+            Child = content
         };
     }
 
     private static TextBlock PreviewText(string text, double opacity = 1)
     {
+        return PreviewText(text, 14, FontWeights.Normal, opacity);
+    }
+
+    private static TextBlock PreviewText(string text, double fontSize, FontWeight fontWeight, double opacity = 1)
+    {
         return new TextBlock
         {
             Text = text,
+            FontSize = fontSize,
+            FontWeight = fontWeight,
             Opacity = opacity,
             TextWrapping = TextWrapping.Wrap
         };
+    }
+
+    private static FrameworkElement CreateQuotePreview(string text)
+    {
+        var quoteText = PreviewText(text, 0.78);
+        Grid.SetColumn(quoteText, 1);
+
+        return new Grid
+        {
+            ColumnDefinitions =
+            {
+                new ColumnDefinition { Width = GridLength.Auto },
+                new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) }
+            },
+            ColumnSpacing = 10,
+            Children =
+            {
+                new Border
+                {
+                    Width = 3,
+                    CornerRadius = new CornerRadius(2),
+                    Background = (Brush)Application.Current.Resources["SystemControlForegroundAccentBrush"]
+                },
+                quoteText
+            }
+        };
+    }
+
+    private static FrameworkElement CreateCodePreview(CodeBlock code)
+    {
+        var panel = new StackPanel { Spacing = 8 };
+
+        if (!string.IsNullOrWhiteSpace(code.Language))
+        {
+            panel.Children.Add(new TextBlock
+            {
+                        Text = code.Language,
+                FontSize = 12,
+                Opacity = 0.62
+            });
+        }
+
+        panel.Children.Add(new TextBlock
+        {
+            Text = code.Code,
+            FontFamily = new FontFamily("Cascadia Mono, Consolas"),
+            FontSize = 13,
+            TextWrapping = TextWrapping.NoWrap
+        });
+
+        return panel;
+    }
+
+    private static FrameworkElement CreateListPreview(ListBlock list)
+    {
+        var panel = new StackPanel { Spacing = 6 };
+
+        for (var index = 0; index < list.Items.Count; index++)
+        {
+            var row = new Grid { ColumnSpacing = 10 };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+            var marker = new TextBlock
+            {
+                Text = list.IsOrdered ? $"{index + 1}." : "-",
+                Opacity = 0.68,
+                MinWidth = 20
+            };
+            var text = PreviewText(list.Items[index]);
+            Grid.SetColumn(text, 1);
+
+            row.Children.Add(marker);
+            row.Children.Add(text);
+            panel.Children.Add(row);
+        }
+
+        return panel;
     }
 }
