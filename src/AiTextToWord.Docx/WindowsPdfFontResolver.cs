@@ -12,18 +12,20 @@ internal sealed class WindowsPdfFontResolver : IFontResolver
     public FontResolverInfo? ResolveTypeface(string familyName, bool isBold, bool isItalic)
     {
         var catalog = Catalog.Value;
-        var family = FindFamily(catalog, familyName)
-            ?? FindFamily(catalog, "Microsoft YaHei")
-            ?? FindFamily(catalog, "SimSun")
-            ?? FindFamily(catalog, "Arial");
+        string[] preferredFamilies = [familyName, "Microsoft YaHei", "DengXian", "SimSun", "Arial"];
 
-        if (family is null)
+        foreach (var preferredFamily in preferredFamilies)
         {
-            return null;
+            var family = FindFamily(catalog, preferredFamily);
+            if (family is null || !family.TryFind(isBold, isItalic, out var face))
+            {
+                continue;
+            }
+
+            return new FontResolverInfo(face.Path, isBold && !face.IsBold, isItalic && !face.IsItalic);
         }
 
-        var face = family.Find(isBold, isItalic);
-        return new FontResolverInfo(face.Path, isBold && !face.IsBold, isItalic && !face.IsItalic);
+        return null;
     }
 
     public byte[]? GetFont(string faceName)
@@ -171,19 +173,20 @@ internal sealed class WindowsPdfFontResolver : IFontResolver
             }
         }
 
-        public FontFace Find(bool isBold, bool isItalic)
+        public bool TryFind(bool isBold, bool isItalic, out FontFace face)
         {
-            return Preferred(faces.Where(face => face.IsBold == isBold && face.IsItalic == isItalic))
+            var match = Preferred(faces.Where(face => face.IsBold == isBold && face.IsItalic == isItalic))
                 ?? Preferred(faces.Where(face => face.IsBold == isBold))
                 ?? Preferred(faces.Where(face => !face.IsBold && !face.IsItalic))
-                ?? Preferred(faces)
-                ?? faces[0];
+                ?? Preferred(faces);
+            face = match ?? new FontFace(string.Empty, IsBold: false, IsItalic: false, CollectionNumber: 0);
+            return match is not null;
         }
 
         private static FontFace? Preferred(IEnumerable<FontFace> candidates)
         {
             return candidates
-                .OrderBy(face => Path.GetExtension(face.Path).Equals(".ttc", StringComparison.OrdinalIgnoreCase))
+                .Where(face => !Path.GetExtension(face.Path).Equals(".ttc", StringComparison.OrdinalIgnoreCase))
                 .FirstOrDefault();
         }
     }
