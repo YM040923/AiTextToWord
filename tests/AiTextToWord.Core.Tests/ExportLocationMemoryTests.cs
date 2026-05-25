@@ -28,4 +28,27 @@ public sealed class ExportLocationMemoryTests
     {
         Assert.Equal("AiTextToWord.Export", ExportLocationMemory.PickerSettingsIdentifier);
     }
+
+    [Fact]
+    public void ExportedFileActionState_FromFilePath_ProvidesFileNameAndFolder()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "ai-text-to-word-export");
+        var filePath = Path.Combine(folder, "AI文本导出.pdf");
+
+        var state = ExportedFileActionState.FromFilePath(filePath);
+
+        Assert.NotNull(state);
+        Assert.Equal(filePath, state.FilePath);
+        Assert.Equal("AI文本导出.pdf", state.FileName);
+        Assert.Equal(folder, state.FolderPath);
+    }
+
+    [Fact]
+    public void ExportedFileActionState_FromFilePath_IgnoresPathsWithoutFileNameOrFolder()
+    {
+        Assert.Null(ExportedFileActionState.FromFilePath(null));
+        Assert.Null(ExportedFileActionState.FromFilePath(string.Empty));
+        Assert.Null(ExportedFileActionState.FromFilePath("AI文本导出.docx"));
+        Assert.Null(ExportedFileActionState.FromFilePath(Path.Combine(Path.GetTempPath(), "folder") + Path.DirectorySeparatorChar));
+    }
 }

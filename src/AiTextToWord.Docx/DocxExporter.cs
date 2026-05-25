@@ -249,12 +249,7 @@ public sealed class DocxExporter
 
     private static SectionProperties DefaultSectionProperties(DocxExportOptions options)
     {
-        var margin = options.PageMargin switch
-        {
-            DocxPageMargin.Narrow => 720,
-            DocxPageMargin.Wide => 1800,
-            _ => 1440
-        };
+        var margin = PageMarginTwips(options);
 
         return new SectionProperties(
             new PageSize { Width = 11906, Height = 16838 },
@@ -268,6 +263,21 @@ public sealed class DocxExporter
                 Footer = 720,
                 Gutter = 0
             });
+    }
+
+    private static int PageMarginTwips(DocxExportOptions options)
+    {
+        if (options.PageMargin == DocxPageMargin.Custom && options.CustomPageMarginCentimeters is { } centimeters)
+        {
+            return (int)Math.Round(Math.Clamp(centimeters, 0.5, 6) * 567, MidpointRounding.AwayFromZero);
+        }
+
+        return options.PageMargin switch
+        {
+            DocxPageMargin.Narrow => 720,
+            DocxPageMargin.Wide => 1800,
+            _ => 1440
+        };
     }
 
     private static string HalfPoints(double points)

@@ -29,7 +29,7 @@ public sealed class PdfExporter
 
         var section = pdfDocument.AddSection();
         section.PageSetup.PageFormat = PageFormat.A4;
-        ApplyMargins(section.PageSetup, options.PageMargin);
+        ApplyMargins(section.PageSetup, options);
 
         for (var index = 0; index < document.Blocks.Count; index++)
         {
@@ -104,19 +104,29 @@ public sealed class PdfExporter
         style.ParagraphFormat.LineSpacing = Unit.FromPoint(fontSize * lineSpacing);
     }
 
-    private static void ApplyMargins(PageSetup pageSetup, DocxPageMargin pageMargin)
+    private static void ApplyMargins(PageSetup pageSetup, DocxExportOptions options)
     {
-        var margin = pageMargin switch
-        {
-            DocxPageMargin.Narrow => Unit.FromCentimeter(1.27),
-            DocxPageMargin.Wide => Unit.FromCentimeter(3.18),
-            _ => Unit.FromCentimeter(2.54)
-        };
+        var margin = PageMarginUnit(options);
 
         pageSetup.TopMargin = margin;
         pageSetup.RightMargin = margin;
         pageSetup.BottomMargin = margin;
         pageSetup.LeftMargin = margin;
+    }
+
+    private static Unit PageMarginUnit(DocxExportOptions options)
+    {
+        if (options.PageMargin == DocxPageMargin.Custom && options.CustomPageMarginCentimeters is { } centimeters)
+        {
+            return Unit.FromCentimeter(Math.Clamp(centimeters, 0.5, 6));
+        }
+
+        return options.PageMargin switch
+        {
+            DocxPageMargin.Narrow => Unit.FromCentimeter(1.27),
+            DocxPageMargin.Wide => Unit.FromCentimeter(3.18),
+            _ => Unit.FromCentimeter(2.54)
+        };
     }
 
     private static void AddBlock(Section section, DocumentBlock block, DocxExportOptions options)

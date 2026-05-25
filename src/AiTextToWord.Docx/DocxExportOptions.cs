@@ -14,6 +14,8 @@ public sealed record DocxExportOptions(string Title)
 
     public DocxPageMargin PageMargin { get; init; } = DocxPageMargin.Standard;
 
+    public double? CustomPageMarginCentimeters { get; init; }
+
     public DocxQuoteStyle QuoteStyle { get; init; } = DocxQuoteStyle.Indented;
 
     public DocxListDensity ListDensity { get; init; } = DocxListDensity.Compact;
@@ -30,7 +32,8 @@ public enum DocxPageMargin
 {
     Narrow,
     Standard,
-    Wide
+    Wide,
+    Custom
 }
 
 public enum DocxQuoteStyle

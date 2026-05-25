@@ -222,6 +222,32 @@ public sealed class DocxExporterTests
     }
 
     [Fact]
+    public void Export_UsesCustomPageMarginCentimeters()
+    {
+        var document = new DocumentModel([new ParagraphBlock("正文")]);
+        using var stream = new MemoryStream();
+
+        new DocxExporter().Export(
+            document,
+            stream,
+            new DocxExportOptions("AI Text Export")
+            {
+                PageMargin = DocxPageMargin.Custom,
+                CustomPageMarginCentimeters = 2
+            });
+
+        stream.Position = 0;
+        using var word = WordprocessingDocument.Open(stream, false);
+        var body = Assert.IsType<Body>(Assert.IsType<Document>(word.MainDocumentPart!.Document).Body);
+        var margins = Assert.IsType<SectionProperties>(body.Elements<SectionProperties>().Single()).GetFirstChild<PageMargin>();
+        Assert.NotNull(margins);
+        Assert.Equal(1134U, margins!.Left!.Value);
+        Assert.Equal(1134U, margins.Right!.Value);
+        Assert.Equal(1134, margins.Top!.Value);
+        Assert.Equal(1134, margins.Bottom!.Value);
+    }
+
+    [Fact]
     public void Export_AppliesGrayQuoteBlockAndComfortableListDensity()
     {
         var document = new DocumentModel([

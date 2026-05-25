@@ -7,7 +7,12 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Runtime.InteropServices.WindowsRuntime;
+using System.Text;
+using System.Text.Json;
+using System.Threading.Tasks;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
@@ -16,8 +21,10 @@ using Microsoft.UI.Xaml.Documents;
 using Microsoft.UI.Xaml.Media;
 using Windows.ApplicationModel.DataTransfer;
 using Windows.Foundation.Collections;
+using Windows.Security.Credentials;
 using Windows.Storage;
 using Windows.Storage.Pickers;
+using Windows.System;
 using Windows.UI.Text;
 using WinRT.Interop;
 
@@ -27,11 +34,15 @@ public sealed partial class MainWindow : Window
 {
     private readonly TextConversionService conversionService = TextConversionService.CreateDefault();
     private ConversionResult? currentResult;
+    private ExportedFileActionState? lastExportedFile;
+    private ExportSettingsSuggestion? pendingAiSuggestion;
     private IReadOnlyList<string> installedFonts = [];
     private bool isLoadingExportSettings;
-    private static readonly double[] BodyFontSizes = [10.5, 11, 12, 14];
-    private static readonly double[] HeadingFontSizes = [16, 18, 20, 22];
-    private static readonly double[] LineSpacings = [1.15, 1.3, 1.5, 2.0];
+    private bool isLoadingAiSettings;
+    private static readonly HttpClient AiHttpClient = new();
+    private static readonly double[] LegacyBodyFontSizes = [10.5, 11, 12, 14];
+    private static readonly double[] LegacyHeadingFontSizes = [16, 18, 20, 22];
+    private static readonly double[] LegacyLineSpacings = [1.15, 1.3, 1.5, 2.0];
     private const string ExportFormatSettingKey = "Export.Format";
     private const string PresetSettingKey = "Export.Preset";
     private const string FontSettingKey = "Export.Font";
@@ -39,9 +50,14 @@ public sealed partial class MainWindow : Window
     private const string HeadingFontSizeSettingKey = "Export.HeadingFontSize";
     private const string LineSpacingSettingKey = "Export.LineSpacing";
     private const string PageMarginSettingKey = "Export.PageMargin";
+    private const string CustomPageMarginSettingKey = "Export.CustomPageMargin";
     private const string QuoteStyleSettingKey = "Export.QuoteStyle";
     private const string ListDensitySettingKey = "Export.ListDensity";
     private const string LastExportFolderSettingKey = "Export.LastFolder";
+    private const string AiEndpointSettingKey = "AI.Endpoint";
+    private const string AiModelSettingKey = "AI.Model";
+    private const string AiCredentialResource = "AiTextToWord.AiSettingsAssistant";
+    private const string AiCredentialUserName = "ApiKey";
     private const string SampleText = """
         # AI 文本整理示例
 
@@ -69,10 +85,12 @@ public sealed partial class MainWindow : Window
         ConfigureWindowChrome();
         LoadInstalledFonts();
         LoadExportSettings();
+        LoadAiSettings();
         isLoadingExportSettings = false;
         SystemBackdrop = new MicaBackdrop();
         UpdateSettingsSummary();
         UpdateExportButton();
+        ShowWorkbenchView();
     }
 
     private void InputTextBox_TextChanged(object sender, TextChangedEventArgs e)
@@ -101,12 +119,24 @@ public sealed partial class MainWindow : Window
         PreviewMetaText.Text = "暂无文档块";
         StatusText.Text = "就绪";
         currentResult = null;
+        lastExportedFile = null;
+        UpdateExportActionButtons();
     }
 
     private void Sample_Click(object sender, RoutedEventArgs e)
     {
         InputTextBox.Text = SampleText;
         StatusText.Text = "已载入示例文本。";
+    }
+
+    private void ShowWorkbench_Click(object sender, RoutedEventArgs e)
+    {
+        ShowWorkbenchView();
+    }
+
+    private void ShowSettings_Click(object sender, RoutedEventArgs e)
+    {
+        ShowSettingsView();
     }
 
     private async void Export_Click(object sender, RoutedEventArgs e)
@@ -152,7 +182,45 @@ public sealed partial class MainWindow : Window
         }
 
         SaveLastExportFolder(file.Path);
-        StatusText.Text = $"{SelectedExportFormatName()} 文档已导出：{file.Name}";
+        lastExportedFile = ExportedFileActionState.FromFilePath(file.Path);
+        UpdateExportActionButtons();
+        StatusText.Text = $"{SelectedExportFormatName()} 文档已导出：{lastExportedFile?.FileName ?? file.Name}";
+    }
+
+    private async void OpenExport_Click(object sender, RoutedEventArgs e)
+    {
+        if (lastExportedFile is null || !File.Exists(lastExportedFile.FilePath))
+        {
+            StatusText.Text = "导出的文件不存在，可能已被移动或删除。";
+            lastExportedFile = null;
+            UpdateExportActionButtons();
+            return;
+        }
+
+        var file = await StorageFile.GetFileFromPathAsync(lastExportedFile.FilePath);
+        var opened = await Launcher.LaunchFileAsync(file);
+        StatusText.Text = opened ? $"已打开：{lastExportedFile.FileName}" : "无法打开导出的文件。";
+    }
+
+    private async void OpenExportFolder_Click(object sender, RoutedEventArgs e)
+    {
+        if (lastExportedFile is null || !Directory.Exists(lastExportedFile.FolderPath))
+        {
+            StatusText.Text = "导出文件夹不存在，可能已被移动或删除。";
+            lastExportedFile = null;
+            UpdateExportActionButtons();
+            return;
+        }
+
+        var folder = await StorageFolder.GetFolderFromPathAsync(lastExportedFile.FolderPath);
+        var options = new FolderLauncherOptions();
+        if (File.Exists(lastExportedFile.FilePath))
+        {
+            options.ItemsToSelect.Add(await StorageFile.GetFileFromPathAsync(lastExportedFile.FilePath));
+        }
+
+        var opened = await Launcher.LaunchFolderAsync(folder, options);
+        StatusText.Text = opened ? $"已打开文件夹：{lastExportedFile.FileName}" : "无法打开导出文件夹。";
     }
 
     private void PresetComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -171,27 +239,27 @@ public sealed partial class MainWindow : Window
         {
             case 1:
                 SelectPreferredFont();
-                BodyFontSizeComboBox.SelectedIndex = 0;
-                HeadingFontSizeComboBox.SelectedIndex = 0;
-                LineSpacingComboBox.SelectedIndex = 0;
+                BodyFontSizeNumberBox.Value = 10.5;
+                HeadingFontSizeNumberBox.Value = 16;
+                LineSpacingNumberBox.Value = 1.15;
                 PageMarginComboBox.SelectedIndex = 0;
                 QuoteStyleComboBox.SelectedIndex = 0;
                 ListDensityComboBox.SelectedIndex = 0;
                 break;
             case 2:
                 SelectPreferredFont();
-                BodyFontSizeComboBox.SelectedIndex = 2;
-                HeadingFontSizeComboBox.SelectedIndex = 3;
-                LineSpacingComboBox.SelectedIndex = 2;
+                BodyFontSizeNumberBox.Value = 12;
+                HeadingFontSizeNumberBox.Value = 22;
+                LineSpacingNumberBox.Value = 1.5;
                 PageMarginComboBox.SelectedIndex = 2;
                 QuoteStyleComboBox.SelectedIndex = 1;
                 ListDensityComboBox.SelectedIndex = 1;
                 break;
             default:
                 SelectPreferredFont();
-                BodyFontSizeComboBox.SelectedIndex = 1;
-                HeadingFontSizeComboBox.SelectedIndex = 2;
-                LineSpacingComboBox.SelectedIndex = 1;
+                BodyFontSizeNumberBox.Value = 11;
+                HeadingFontSizeNumberBox.Value = 20;
+                LineSpacingNumberBox.Value = 1.3;
                 PageMarginComboBox.SelectedIndex = 1;
                 QuoteStyleComboBox.SelectedIndex = 0;
                 ListDensityComboBox.SelectedIndex = 0;
@@ -200,11 +268,31 @@ public sealed partial class MainWindow : Window
 
         UpdateSettingsSummary();
         UpdateExportButton();
+        UpdateCustomMarginVisibility();
         RefreshPreview();
         SaveExportSettings();
     }
 
     private void ExportSettings_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        if (!AreExportSettingControlsReady())
+        {
+            return;
+        }
+
+        if (isLoadingExportSettings)
+        {
+            return;
+        }
+
+        UpdateSettingsSummary();
+        UpdateExportButton();
+        UpdateCustomMarginVisibility();
+        RefreshPreview();
+        SaveExportSettings();
+    }
+
+    private void ExportNumberSettings_Changed(NumberBox sender, NumberBoxValueChangedEventArgs args)
     {
         if (!AreExportSettingControlsReady())
         {
@@ -233,15 +321,17 @@ public sealed partial class MainWindow : Window
                 _ => DocxStylePreset.StandardDocument
             },
             FontFamily = SelectedFontFamily(),
-            BodyFontSize = SelectedDouble(BodyFontSizes, BodyFontSizeComboBox.SelectedIndex, 11),
-            HeadingFontSize = SelectedDouble(HeadingFontSizes, HeadingFontSizeComboBox.SelectedIndex, 20),
-            LineSpacing = SelectedDouble(LineSpacings, LineSpacingComboBox.SelectedIndex, 1.3),
+            BodyFontSize = SelectedBodyFontSize(),
+            HeadingFontSize = SelectedHeadingFontSize(),
+            LineSpacing = SelectedLineSpacing(),
             PageMargin = PageMarginComboBox.SelectedIndex switch
             {
                 0 => DocxPageMargin.Narrow,
                 2 => DocxPageMargin.Wide,
+                3 => DocxPageMargin.Custom,
                 _ => DocxPageMargin.Standard
             },
+            CustomPageMarginCentimeters = SelectedCustomPageMargin(),
             QuoteStyle = QuoteStyleComboBox.SelectedIndex == 1 ? DocxQuoteStyle.GrayBlock : DocxQuoteStyle.Indented,
             ListDensity = ListDensityComboBox.SelectedIndex == 1 ? DocxListDensity.Comfortable : DocxListDensity.Compact
         };
@@ -261,8 +351,8 @@ public sealed partial class MainWindow : Window
             _ => "标准文档"
         };
         var font = SelectedFontFamily();
-        var bodySize = SelectedDouble(BodyFontSizes, BodyFontSizeComboBox.SelectedIndex, 11);
-        var lineSpacing = SelectedDouble(LineSpacings, LineSpacingComboBox.SelectedIndex, 1.3);
+        var bodySize = SelectedBodyFontSize();
+        var lineSpacing = SelectedLineSpacing();
         SettingsSummaryText.Text = $"{SelectedExportFormatName()} · {preset} · {font} · {bodySize:0.#}pt · {lineSpacing:0.##} 倍行距";
     }
 
@@ -272,6 +362,130 @@ public sealed partial class MainWindow : Window
         {
             ExportButtonText.Text = $"导出 {SelectedExportFormatName()}";
         }
+    }
+
+    private void UpdateExportActionButtons()
+    {
+        if (OpenExportButton is null || OpenExportFolderButton is null)
+        {
+            return;
+        }
+
+        var visibility = lastExportedFile is null ? Visibility.Collapsed : Visibility.Visible;
+        OpenExportButton.Visibility = visibility;
+        OpenExportFolderButton.Visibility = visibility;
+    }
+
+    private void ShowWorkbenchView()
+    {
+        WorkbenchHeader.Visibility = Visibility.Visible;
+        WorkbenchBody.Visibility = Visibility.Visible;
+        WorkbenchFooter.Visibility = Visibility.Visible;
+        SettingsView.Visibility = Visibility.Collapsed;
+        WorkbenchNavButton.Opacity = 1;
+        SettingsNavButton.Opacity = 0.72;
+        StatusText.Text = "工作台";
+    }
+
+    private void ShowSettingsView()
+    {
+        WorkbenchHeader.Visibility = Visibility.Collapsed;
+        WorkbenchBody.Visibility = Visibility.Collapsed;
+        WorkbenchFooter.Visibility = Visibility.Collapsed;
+        SettingsView.Visibility = Visibility.Visible;
+        WorkbenchNavButton.Opacity = 0.72;
+        SettingsNavButton.Opacity = 1;
+        StatusText.Text = "设置";
+    }
+
+    private async void SuggestSettings_Click(object sender, RoutedEventArgs e)
+    {
+        var request = AiInstructionTextBox.Text.Trim();
+        if (string.IsNullOrWhiteSpace(request))
+        {
+            AiAssistantStatusText.Text = "先输入你想要的文档效果。";
+            return;
+        }
+
+        try
+        {
+            AiSuggestButton.IsEnabled = false;
+            AiAssistantStatusText.Text = HasAiServiceConfiguration()
+                ? "正在请求 AI 模型生成设置建议..."
+                : "未配置模型，正在使用本地规则生成建议。";
+
+            pendingAiSuggestion = HasAiServiceConfiguration()
+                ? await RequestAiSettingsSuggestionAsync(request)
+                : AiSettingsSuggestionEngine.Suggest(request, SelectedFontFamily());
+
+            ShowAiSuggestion(pendingAiSuggestion);
+            AiAssistantStatusText.Text = HasAiServiceConfiguration()
+                ? "AI 已生成建议，确认后才会应用。"
+                : "已生成本地建议，确认后才会应用。";
+        }
+        catch (Exception ex) when (ex is HttpRequestException or JsonException or InvalidOperationException)
+        {
+            pendingAiSuggestion = AiSettingsSuggestionEngine.Suggest(request, SelectedFontFamily());
+            ShowAiSuggestion(pendingAiSuggestion);
+            AiAssistantStatusText.Text = $"模型请求失败，已使用本地建议：{ex.Message}";
+        }
+        finally
+        {
+            AiSuggestButton.IsEnabled = true;
+        }
+    }
+
+    private void ApplyAiSuggestion_Click(object sender, RoutedEventArgs e)
+    {
+        if (pendingAiSuggestion is null)
+        {
+            return;
+        }
+
+        ApplySettingsSuggestion(pendingAiSuggestion);
+        AiSuggestionPanel.Visibility = Visibility.Collapsed;
+        pendingAiSuggestion = null;
+        UpdateSettingsSummary();
+        UpdateExportButton();
+        RefreshPreview();
+        SaveExportSettings();
+        AiAssistantStatusText.Text = "已应用建议到导出设置。";
+    }
+
+    private void DismissAiSuggestion_Click(object sender, RoutedEventArgs e)
+    {
+        pendingAiSuggestion = null;
+        AiSuggestionPanel.Visibility = Visibility.Collapsed;
+        AiAssistantStatusText.Text = "已取消建议。";
+    }
+
+    private void ShowAiSuggestion(ExportSettingsSuggestion suggestion)
+    {
+        AiSuggestionSummaryText.Text = suggestion.DisplaySummary();
+        AiSuggestionPanel.Visibility = Visibility.Visible;
+    }
+
+    private void ApplySettingsSuggestion(ExportSettingsSuggestion suggestion)
+    {
+        ExportFormatComboBox.SelectedIndex = suggestion.Format == ExportFormat.Pdf ? 1 : 0;
+        PresetComboBox.SelectedIndex = suggestion.Preset switch
+        {
+            ExportPreset.CompactNotes => 1,
+            ExportPreset.FormalReport => 2,
+            _ => 0
+        };
+        FontSearchBox.Text = FindInstalledFont(suggestion.FontFamily) ?? suggestion.FontFamily;
+        BodyFontSizeNumberBox.Value = suggestion.BodyFontSize;
+        HeadingFontSizeNumberBox.Value = suggestion.HeadingFontSize;
+        LineSpacingNumberBox.Value = suggestion.LineSpacing;
+        PageMarginComboBox.SelectedIndex = suggestion.PageMargin switch
+        {
+            ExportPageMargin.Narrow => 0,
+            ExportPageMargin.Wide => 2,
+            _ => 1
+        };
+        QuoteStyleComboBox.SelectedIndex = suggestion.QuoteStyle == ExportQuoteStyle.GrayBlock ? 1 : 0;
+        ListDensityComboBox.SelectedIndex = suggestion.ListDensity == ExportListDensity.Comfortable ? 1 : 0;
     }
 
     private bool IsPdfExportSelected()
@@ -405,10 +619,30 @@ public sealed partial class MainWindow : Window
 
         ExportFormatComboBox.SelectedIndex = ReadIndexSetting(settings, ExportFormatSettingKey, 0, ExportFormatComboBox.Items.Count);
         PresetComboBox.SelectedIndex = ReadIndexSetting(settings, PresetSettingKey, 0, PresetComboBox.Items.Count);
-        BodyFontSizeComboBox.SelectedIndex = ReadIndexSetting(settings, BodyFontSizeSettingKey, 1, BodyFontSizeComboBox.Items.Count);
-        HeadingFontSizeComboBox.SelectedIndex = ReadIndexSetting(settings, HeadingFontSizeSettingKey, 2, HeadingFontSizeComboBox.Items.Count);
-        LineSpacingComboBox.SelectedIndex = ReadIndexSetting(settings, LineSpacingSettingKey, 1, LineSpacingComboBox.Items.Count);
+        BodyFontSizeNumberBox.Value = ReadNumberSetting(
+            settings,
+            BodyFontSizeSettingKey,
+            11,
+            ExportSettingRanges.MinimumBodyFontSize,
+            ExportSettingRanges.MaximumBodyFontSize,
+            LegacyBodyFontSizes);
+        HeadingFontSizeNumberBox.Value = ReadNumberSetting(
+            settings,
+            HeadingFontSizeSettingKey,
+            20,
+            ExportSettingRanges.MinimumHeadingFontSize,
+            ExportSettingRanges.MaximumHeadingFontSize,
+            LegacyHeadingFontSizes);
+        LineSpacingNumberBox.Value = ReadNumberSetting(
+            settings,
+            LineSpacingSettingKey,
+            1.3,
+            ExportSettingRanges.MinimumLineSpacing,
+            ExportSettingRanges.MaximumLineSpacing,
+            LegacyLineSpacings);
         PageMarginComboBox.SelectedIndex = ReadIndexSetting(settings, PageMarginSettingKey, 1, PageMarginComboBox.Items.Count);
+        CustomMarginNumberBox.Value = ReadNumberSetting(settings, CustomPageMarginSettingKey, 2.54, 0.5, 6, []);
+        UpdateCustomMarginVisibility();
         QuoteStyleComboBox.SelectedIndex = ReadIndexSetting(settings, QuoteStyleSettingKey, 0, QuoteStyleComboBox.Items.Count);
         ListDensityComboBox.SelectedIndex = ReadIndexSetting(settings, ListDensitySettingKey, 0, ListDensityComboBox.Items.Count);
 
@@ -430,10 +664,11 @@ public sealed partial class MainWindow : Window
         settings[ExportFormatSettingKey] = ExportFormatComboBox.SelectedIndex;
         settings[PresetSettingKey] = PresetComboBox.SelectedIndex;
         settings[FontSettingKey] = SelectedFontFamily();
-        settings[BodyFontSizeSettingKey] = BodyFontSizeComboBox.SelectedIndex;
-        settings[HeadingFontSizeSettingKey] = HeadingFontSizeComboBox.SelectedIndex;
-        settings[LineSpacingSettingKey] = LineSpacingComboBox.SelectedIndex;
+        settings[BodyFontSizeSettingKey] = SelectedBodyFontSize();
+        settings[HeadingFontSizeSettingKey] = SelectedHeadingFontSize();
+        settings[LineSpacingSettingKey] = SelectedLineSpacing();
         settings[PageMarginSettingKey] = PageMarginComboBox.SelectedIndex;
+        settings[CustomPageMarginSettingKey] = SelectedCustomPageMargin();
         settings[QuoteStyleSettingKey] = QuoteStyleComboBox.SelectedIndex;
         settings[ListDensitySettingKey] = ListDensityComboBox.SelectedIndex;
     }
@@ -444,6 +679,175 @@ public sealed partial class MainWindow : Window
         if (folderPath is not null)
         {
             ApplicationData.Current.LocalSettings.Values[LastExportFolderSettingKey] = folderPath;
+        }
+    }
+
+    private void LoadAiSettings()
+    {
+        isLoadingAiSettings = true;
+        var settings = ApplicationData.Current.LocalSettings.Values;
+        AiEndpointTextBox.Text = settings.TryGetValue(AiEndpointSettingKey, out var endpoint) && endpoint is string endpointText
+            ? endpointText
+            : string.Empty;
+        AiModelTextBox.Text = settings.TryGetValue(AiModelSettingKey, out var model) && model is string modelText
+            ? modelText
+            : string.Empty;
+        AiApiKeyPasswordBox.Password = LoadAiApiKey();
+        isLoadingAiSettings = false;
+    }
+
+    private void AiTextSettings_Changed(object sender, TextChangedEventArgs e)
+    {
+        SaveAiSettings();
+    }
+
+    private void AiPasswordSettings_Changed(object sender, RoutedEventArgs e)
+    {
+        SaveAiSettings();
+    }
+
+    private void SaveAiSettings()
+    {
+        if (isLoadingAiSettings)
+        {
+            return;
+        }
+
+        var settings = ApplicationData.Current.LocalSettings.Values;
+        settings[AiEndpointSettingKey] = AiEndpointTextBox.Text.Trim();
+        settings[AiModelSettingKey] = AiModelTextBox.Text.Trim();
+        SaveAiApiKey(AiApiKeyPasswordBox.Password);
+    }
+
+    private bool HasAiServiceConfiguration()
+    {
+        return !string.IsNullOrWhiteSpace(AiEndpointTextBox.Text)
+            && !string.IsNullOrWhiteSpace(AiModelTextBox.Text)
+            && !string.IsNullOrWhiteSpace(AiApiKeyPasswordBox.Password);
+    }
+
+    private async Task<ExportSettingsSuggestion> RequestAiSettingsSuggestionAsync(string request)
+    {
+        var endpoint = AiEndpointTextBox.Text.Trim();
+        var model = AiModelTextBox.Text.Trim();
+        var apiKey = AiApiKeyPasswordBox.Password;
+        if (string.IsNullOrWhiteSpace(endpoint) || string.IsNullOrWhiteSpace(model) || string.IsNullOrWhiteSpace(apiKey))
+        {
+            return AiSettingsSuggestionEngine.Suggest(request, SelectedFontFamily());
+        }
+
+        using var message = new HttpRequestMessage(HttpMethod.Post, endpoint);
+        message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+        var payload = new
+        {
+            model,
+            temperature = 0.1,
+            response_format = new { type = "json_object" },
+            messages = new object[]
+            {
+                new
+                {
+                    role = "system",
+                    content = """
+                        你是一个桌面软件的设置助手。只返回 JSON 对象，不要解释。
+                        允许字段：
+                        format: word|pdf
+                        preset: standard|compact|formal
+                        fontFamily: 字体名称
+                        bodyFontSize: 8 到 72
+                        headingFontSize: 10 到 96
+                        lineSpacing: 1 到 3
+                        pageMargin: narrow|standard|wide
+                        quoteStyle: indented|gray
+                        listDensity: compact|comfortable
+                        """
+                },
+                new
+                {
+                    role = "user",
+                    content = request
+                }
+            }
+        };
+        message.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
+
+        using var response = await AiHttpClient.SendAsync(message);
+        var responseText = await response.Content.ReadAsStringAsync();
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new HttpRequestException($"HTTP {(int)response.StatusCode}: {response.ReasonPhrase}");
+        }
+
+        var modelContent = ExtractChatCompletionContent(responseText) ?? responseText;
+        if (!AiSettingsSuggestionEngine.TryParseModelJson(modelContent, SelectedFontFamily(), out var suggestion))
+        {
+            throw new JsonException("模型没有返回可识别的设置 JSON。");
+        }
+
+        return suggestion;
+    }
+
+    private static string? ExtractChatCompletionContent(string responseText)
+    {
+        using var document = JsonDocument.Parse(responseText);
+        if (!document.RootElement.TryGetProperty("choices", out var choices)
+            || choices.ValueKind != JsonValueKind.Array
+            || choices.GetArrayLength() == 0)
+        {
+            return null;
+        }
+
+        var first = choices[0];
+        if (first.TryGetProperty("message", out var message)
+            && message.TryGetProperty("content", out var content)
+            && content.ValueKind == JsonValueKind.String)
+        {
+            return content.GetString();
+        }
+
+        return null;
+    }
+
+    private static string LoadAiApiKey()
+    {
+        try
+        {
+            var vault = new PasswordVault();
+            var credential = vault.Retrieve(AiCredentialResource, AiCredentialUserName);
+            credential.RetrievePassword();
+            return credential.Password;
+        }
+        catch
+        {
+            return string.Empty;
+        }
+    }
+
+    private static void SaveAiApiKey(string apiKey)
+    {
+        try
+        {
+            var vault = new PasswordVault();
+            try
+            {
+                foreach (var credential in vault.FindAllByResource(AiCredentialResource))
+                {
+                    vault.Remove(credential);
+                }
+            }
+            catch
+            {
+                // No saved credential yet.
+            }
+
+            if (!string.IsNullOrWhiteSpace(apiKey))
+            {
+                vault.Add(new PasswordCredential(AiCredentialResource, AiCredentialUserName, apiKey));
+            }
+        }
+        catch
+        {
+            // Credential Locker can be unavailable in some unpackaged/debug contexts.
         }
     }
 
@@ -459,6 +863,19 @@ public sealed partial class MainWindow : Window
         }
 
         return index >= 0 && index < itemCount ? index : fallback;
+    }
+
+    private static double ReadNumberSetting(
+        IPropertySet settings,
+        string key,
+        double fallback,
+        double minimum,
+        double maximum,
+        IReadOnlyList<double> legacyValues)
+    {
+        return settings.TryGetValue(key, out var value)
+            ? ExportSettingRanges.NumberFromSetting(value, fallback, minimum, maximum, legacyValues)
+            : fallback;
     }
 
     private void ConfigureWindowChrome()
@@ -484,17 +901,43 @@ public sealed partial class MainWindow : Window
             && ExportButtonText is not null
             && PresetComboBox is not null
             && FontSearchBox is not null
-            && BodyFontSizeComboBox is not null
-            && HeadingFontSizeComboBox is not null
-            && LineSpacingComboBox is not null
+            && BodyFontSizeNumberBox is not null
+            && HeadingFontSizeNumberBox is not null
+            && LineSpacingNumberBox is not null
             && PageMarginComboBox is not null
+            && CustomMarginPanel is not null
+            && CustomMarginNumberBox is not null
             && QuoteStyleComboBox is not null
             && ListDensityComboBox is not null;
     }
 
-    private static double SelectedDouble(double[] values, int index, double fallback)
+    private double SelectedBodyFontSize()
     {
-        return index >= 0 && index < values.Length ? values[index] : fallback;
+        return ExportSettingRanges.ClampBodyFontSize(BodyFontSizeNumberBox.Value);
+    }
+
+    private double SelectedHeadingFontSize()
+    {
+        return ExportSettingRanges.ClampHeadingFontSize(HeadingFontSizeNumberBox.Value);
+    }
+
+    private double SelectedLineSpacing()
+    {
+        return ExportSettingRanges.ClampLineSpacing(LineSpacingNumberBox.Value);
+    }
+
+    private double SelectedCustomPageMargin()
+    {
+        var value = CustomMarginNumberBox.Value;
+        return double.IsNaN(value) || double.IsInfinity(value) ? 2.54 : Math.Clamp(value, 0.5, 6);
+    }
+
+    private void UpdateCustomMarginVisibility()
+    {
+        if (CustomMarginPanel is not null)
+        {
+            CustomMarginPanel.Visibility = PageMarginComboBox.SelectedIndex == 3 ? Visibility.Visible : Visibility.Collapsed;
+        }
     }
 
     private void ConvertInput()

@@ -22,3 +22,27 @@ public static class ExportLocationMemory
         }
     }
 }
+
+public sealed record ExportedFileActionState(string FilePath, string FileName, string FolderPath)
+{
+    public static ExportedFileActionState? FromFilePath(string? filePath)
+    {
+        var folderPath = ExportLocationMemory.ParentFolderFromFilePath(filePath);
+        if (folderPath is null || string.IsNullOrWhiteSpace(filePath))
+        {
+            return null;
+        }
+
+        try
+        {
+            var fileName = Path.GetFileName(filePath);
+            return string.IsNullOrWhiteSpace(fileName)
+                ? null
+                : new ExportedFileActionState(filePath, fileName, folderPath);
+        }
+        catch (ArgumentException)
+        {
+            return null;
+        }
+    }
+}

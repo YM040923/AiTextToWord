@@ -18,13 +18,23 @@ public sealed record PreviewLayoutMetrics(
             Heading2FontSize: Math.Max(options.HeadingFontSize - 2, options.BodyFontSize + 2),
             Heading3FontSize: Math.Max(options.HeadingFontSize - 4, options.BodyFontSize + 1),
             LineHeight: options.BodyFontSize * options.LineSpacing,
-            PagePadding: options.PageMargin switch
-            {
-                DocxPageMargin.Narrow => 40,
-                DocxPageMargin.Wide => 72,
-                _ => 56
-            },
+            PagePadding: ComputePagePadding(options),
             ListItemSpacing: options.ListDensity == DocxListDensity.Comfortable ? 6 : 3,
             UseGrayQuoteBlock: options.QuoteStyle == DocxQuoteStyle.GrayBlock);
+    }
+
+    private static double ComputePagePadding(DocxExportOptions options)
+    {
+        if (options.PageMargin == DocxPageMargin.Custom && options.CustomPageMarginCentimeters is { } centimeters)
+        {
+            return Math.Clamp(centimeters, 0.5, 6) * 22;
+        }
+
+        return options.PageMargin switch
+        {
+            DocxPageMargin.Narrow => 40,
+            DocxPageMargin.Wide => 72,
+            _ => 56
+        };
     }
 }
