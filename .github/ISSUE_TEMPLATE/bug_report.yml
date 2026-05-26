@@ -1,0 +1,69 @@
+name: Bug 反馈
+description: 报告应用崩溃、安装失败、转换错误或导出异常
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: input
+    id: app-version
+    attributes:
+      label: 应用版本
+      description: 例如 1.0.0.16
+      placeholder: "1.0.0.16"
+    validations:
+      required: true
+  - type: input
+    id: windows-version
+    attributes:
+      label: Windows 版本
+      placeholder: "Windows 11 24H2"
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: 问题类型
+      options:
+        - 安装或启动
+        - Markdown 识别
+        - Word 导出
+        - PDF 导出
+        - 设置保存
+        - 界面显示
+        - 其他
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 请按步骤写清楚你做了什么
+      placeholder: |
+        1. 打开应用
+        2. 粘贴以下文本
+        3. 点击导出 Word
+        4. 出现...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 预期结果
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际结果
+    validations:
+      required: true
+  - type: textarea
+    id: sample
+    attributes:
+      label: 可公开的原始文本样本
+      description: 如果涉及隐私，请先脱敏
+      render: markdown
+  - type: textarea
+    id: logs
+    attributes:
+      label: 截图或错误信息
+      description: 可以粘贴错误码、截图、事件日志或导出文件表现

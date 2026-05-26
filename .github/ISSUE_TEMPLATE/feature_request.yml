@@ -1,0 +1,46 @@
+name: 功能建议
+description: 提出新的格式、导出、安装或界面改进建议
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: scenario
+    attributes:
+      label: 使用场景
+      description: 你在什么情况下需要这个功能？
+      placeholder: "例如：我经常把 AI 生成的课程讲义整理成 Word 发给学生..."
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: 当前不方便的地方
+      description: 现在的流程哪里让你多花了时间？
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 你希望怎么改
+      description: 可以描述按钮、设置项、导出效果或示例文档
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: 功能范围
+      options:
+        - Markdown 识别
+        - Word / PDF 导出
+        - 格式设置
+        - 安装体验
+        - UI 界面
+        - 文档和开源项目
+        - 其他
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 你现在的替代办法
+      description: 例如手动复制到 Word 后重新排版

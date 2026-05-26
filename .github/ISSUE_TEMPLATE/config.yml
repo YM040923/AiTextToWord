@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 最新版本下载
+    url: https://github.com/YM040923/AiTextToWord/releases/latest
+    about: 下载最新 MSIX 安装包、证书和安装脚本。
