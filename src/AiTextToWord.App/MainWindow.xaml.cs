@@ -1012,6 +1012,7 @@ public sealed partial class MainWindow : Window
                 Opacity = 0.36
             },
             ListBlock list => CreateListPreview(list, metrics, fontFamily),
+            TableBlock table => CreateTablePreview(table, metrics, fontFamily),
             _ => PreviewText(string.Empty, metrics.BodyFontSize, FontWeights.Normal, metrics, fontFamily)
         };
     }
@@ -1178,6 +1179,85 @@ public sealed partial class MainWindow : Window
         }
 
         return panel;
+    }
+
+    private static FrameworkElement CreateTablePreview(TableBlock table, PreviewLayoutMetrics metrics, string fontFamily)
+    {
+        var columnCount = Math.Max(
+            table.Headers.Count,
+            table.Rows.Select(row => row.Count).DefaultIfEmpty(0).Max());
+        if (columnCount == 0)
+        {
+            return PreviewText(string.Empty, metrics.BodyFontSize, FontWeights.Normal, metrics, fontFamily);
+        }
+
+        var grid = new Grid
+        {
+            Margin = new Thickness(0, 4, 0, 14),
+            BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 209, 213, 219)),
+            BorderThickness = new Thickness(1)
+        };
+        for (var index = 0; index < columnCount; index++)
+        {
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        }
+
+        AddPreviewTableRow(grid, table.Headers, columnCount, metrics, fontFamily, isHeader: true);
+        foreach (var row in table.Rows)
+        {
+            AddPreviewTableRow(grid, row, columnCount, metrics, fontFamily, isHeader: false);
+        }
+
+        return grid;
+    }
+
+    private static void AddPreviewTableRow(
+        Grid grid,
+        IReadOnlyList<TableCell> cells,
+        int columnCount,
+        PreviewLayoutMetrics metrics,
+        string fontFamily,
+        bool isHeader)
+    {
+        var rowIndex = grid.RowDefinitions.Count;
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+        for (var columnIndex = 0; columnIndex < columnCount; columnIndex++)
+        {
+            var cell = columnIndex < cells.Count ? cells[columnIndex] : new TableCell(string.Empty, []);
+            var text = PreviewText(
+                cell.Text,
+                metrics.BodyFontSize,
+                isHeader ? FontWeights.SemiBold : FontWeights.Normal,
+                metrics,
+                fontFamily,
+                isHeader ? HeaderPreviewInlines(cell) : cell.Inlines);
+            var border = new Border
+            {
+                Padding = new Thickness(8, 6, 8, 6),
+                BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 209, 213, 219)),
+                BorderThickness = new Thickness(0, 0, columnIndex == columnCount - 1 ? 0 : 1, rowIndex == 0 ? 1 : 0),
+                Background = isHeader ? new SolidColorBrush(Windows.UI.Color.FromArgb(255, 246, 247, 249)) : null,
+                Child = text
+            };
+            Grid.SetRow(border, rowIndex);
+            Grid.SetColumn(border, columnIndex);
+            grid.Children.Add(border);
+        }
+    }
+
+    private static IReadOnlyList<DocumentInline> HeaderPreviewInlines(TableCell cell)
+    {
+        return cell.Inlines.Count == 0
+            ? [new BoldInline(cell.Text)]
+            : cell.Inlines.Select<DocumentInline, DocumentInline>(inline => inline switch
+            {
+                TextInline text => new BoldInline(text.Text),
+                BoldInline bold => bold,
+                ItalicInline italic => new BoldInline(italic.Text),
+                CodeInline code => code,
+                _ => inline
+            }).ToList();
     }
 
     private static void AppendPreviewInlines(

@@ -86,6 +86,28 @@ public sealed class MarkdownDocumentParserTests
     }
 
     [Fact]
+    public void Parse_CreatesTableBlocksFromMarkdownPipeTables()
+    {
+        var parser = new MarkdownDocumentParser();
+
+        var document = parser.Parse("""
+        | Name | Status | Notes |
+        | --- | --- | --- |
+        | Word | **Ready** | Uses `docx` |
+        | PDF | _Preview_ | Export too |
+        """);
+
+        var table = Assert.IsType<TableBlock>(Assert.Single(document.Blocks));
+        Assert.Equal(["Name", "Status", "Notes"], table.Headers.Select(cell => cell.Text));
+        Assert.Equal(2, table.Rows.Count);
+        Assert.Equal(["Word", "Ready", "Uses docx"], table.Rows[0].Select(cell => cell.Text));
+        Assert.Equal(["PDF", "Preview", "Export too"], table.Rows[1].Select(cell => cell.Text));
+        Assert.Contains(table.Rows[0][1].Inlines, inline => inline is BoldInline { Text: "Ready" });
+        Assert.Contains(table.Rows[0][2].Inlines, inline => inline is CodeInline { Text: "docx" });
+        Assert.Contains(table.Rows[1][1].Inlines, inline => inline is ItalicInline { Text: "Preview" });
+    }
+
+    [Fact]
     public void Parse_StripsCommonInlineMarkdownMarkersFromAiChatText()
     {
         var parser = new MarkdownDocumentParser();

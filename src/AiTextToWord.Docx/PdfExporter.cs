@@ -1,5 +1,6 @@
 using AiTextToWord.Core.Model;
 using MigraDoc.DocumentObjectModel;
+using MigraDoc.DocumentObjectModel.Tables;
 using MigraDoc.Rendering;
 using PdfSharp.Fonts;
 
@@ -142,6 +143,9 @@ public sealed class PdfExporter
             case ListBlock list:
                 AddList(section, list, options);
                 break;
+            case TableBlock table:
+                AddTable(section, table, options);
+                break;
             case CodeBlock code:
                 AddCode(section, code);
                 break;
@@ -163,6 +167,72 @@ public sealed class PdfExporter
             paragraph.Format.ListInfo.ListType = list.IsOrdered ? ListType.NumberList1 : ListType.BulletList1;
             AddInlines(paragraph, list.Items[index], list.ItemInlines is not null && index < list.ItemInlines.Count ? list.ItemInlines[index] : null);
         }
+    }
+
+    private static void AddTable(Section section, TableBlock tableBlock, DocxExportOptions options)
+    {
+        var columnCount = Math.Max(
+            tableBlock.Headers.Count,
+            tableBlock.Rows.Select(row => row.Count).DefaultIfEmpty(0).Max());
+        if (columnCount == 0)
+        {
+            return;
+        }
+
+        var table = section.AddTable();
+        table.Borders.Width = Unit.FromPoint(0.5);
+        table.Borders.Color = Colors.LightGray;
+        table.Format.SpaceBefore = Unit.FromPoint(8);
+        table.Format.SpaceAfter = Unit.FromPoint(8);
+
+        var availableWidth = Unit.FromCentimeter(21.0) - PageMarginUnit(options) - PageMarginUnit(options);
+        var columnWidth = availableWidth / columnCount;
+        for (var index = 0; index < columnCount; index++)
+        {
+            table.AddColumn(columnWidth);
+        }
+
+        var headerRow = table.AddRow();
+        headerRow.HeadingFormat = true;
+        headerRow.Shading.Color = Colors.WhiteSmoke;
+        AddPdfTableCells(headerRow, tableBlock.Headers, columnCount, isHeader: true);
+
+        foreach (var rowCells in tableBlock.Rows)
+        {
+            AddPdfTableCells(table.AddRow(), rowCells, columnCount, isHeader: false);
+        }
+    }
+
+    private static void AddPdfTableCells(
+        Row row,
+        IReadOnlyList<TableCell> cells,
+        int columnCount,
+        bool isHeader)
+    {
+        for (var index = 0; index < columnCount; index++)
+        {
+            var paragraph = row.Cells[index].AddParagraph();
+            paragraph.Format.SpaceBefore = Unit.FromPoint(3);
+            paragraph.Format.SpaceAfter = Unit.FromPoint(3);
+            if (index < cells.Count)
+            {
+                AddInlines(paragraph, cells[index].Text, isHeader ? HeaderInlines(cells[index]) : cells[index].Inlines);
+            }
+        }
+    }
+
+    private static IReadOnlyList<DocumentInline> HeaderInlines(TableCell cell)
+    {
+        return cell.Inlines.Count == 0
+            ? [new BoldInline(cell.Text)]
+            : cell.Inlines.Select<DocumentInline, DocumentInline>(inline => inline switch
+            {
+                TextInline text => new BoldInline(text.Text),
+                BoldInline bold => bold,
+                ItalicInline italic => new BoldInline(italic.Text),
+                CodeInline code => code,
+                _ => inline
+            }).ToList();
     }
 
     private static void AddQuote(Section section, IReadOnlyList<BlockQuoteBlock> quotes, DocxExportOptions options)

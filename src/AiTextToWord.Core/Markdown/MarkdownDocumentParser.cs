@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.RegularExpressions;
 using Markdig;
+using Markdig.Extensions.Tables;
 using Markdig.Syntax;
 using Markdig.Syntax.Inlines;
 using Model = AiTextToWord.Core.Model;
@@ -57,6 +58,14 @@ public sealed class MarkdownDocumentParser
 
             case Markdig.Syntax.ListBlock list:
                 blocks.Add(ToListBlock(list, source));
+                break;
+
+            case Table table:
+                var tableBlock = ToTableBlock(table, source);
+                if (tableBlock is not null)
+                {
+                    blocks.Add(tableBlock);
+                }
                 break;
 
             case FencedCodeBlock fencedCode:
@@ -120,6 +129,63 @@ public sealed class MarkdownDocumentParser
         }
 
         return new Model.ListBlock(list.IsOrdered, items, itemInlines);
+    }
+
+    private static Model.TableBlock? ToTableBlock(Table table, string source)
+    {
+        var rows = table
+            .OfType<TableRow>()
+            .Select(row => ToTableRow(row, source))
+            .Where(row => row.Count > 0)
+            .ToList();
+
+        if (rows.Count == 0)
+        {
+            return null;
+        }
+
+        var headers = rows[0];
+        var bodyRows = rows.Skip(1).ToList();
+        return new Model.TableBlock(headers, bodyRows);
+    }
+
+    private static IReadOnlyList<Model.TableCell> ToTableRow(TableRow row, string source)
+    {
+        return row
+            .OfType<TableCell>()
+            .Select(cell => ToTableCell(cell, source))
+            .ToList();
+    }
+
+    private static Model.TableCell ToTableCell(TableCell cell, string source)
+    {
+        var text = new StringBuilder();
+        var inlines = new List<Model.DocumentInline>();
+
+        foreach (var block in cell)
+        {
+            if (block is not Markdig.Syntax.ParagraphBlock paragraph)
+            {
+                continue;
+            }
+
+            var parsed = ParseInline(paragraph.Inline, ExtractSource(source, paragraph));
+            if (parsed.Text.Length == 0)
+            {
+                continue;
+            }
+
+            if (text.Length > 0)
+            {
+                text.Append(' ');
+                inlines.Add(new Model.TextInline(" "));
+            }
+
+            text.Append(parsed.Text);
+            inlines.AddRange(parsed.Inlines);
+        }
+
+        return new Model.TableCell(text.ToString().Trim(), inlines);
     }
 
     private static InlineParseResult ParseListItem(ListItemBlock item, string source)

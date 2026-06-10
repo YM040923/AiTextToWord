@@ -103,6 +103,31 @@ public sealed class DocxExporterTests
     }
 
     [Fact]
+    public void Export_WritesMarkdownTablesAsWordTables()
+    {
+        var document = new MarkdownDocumentParser().Parse("""
+        | Name | Status | Notes |
+        | --- | --- | --- |
+        | Word | **Ready** | Uses `docx` |
+        | PDF | Preview | Export too |
+        """);
+        using var stream = new MemoryStream();
+
+        new DocxExporter().Export(document, stream, new DocxExportOptions("AI Text Export"));
+
+        stream.Position = 0;
+        using var word = WordprocessingDocument.Open(stream, false);
+        var body = Assert.IsType<Body>(Assert.IsType<Document>(word.MainDocumentPart!.Document).Body);
+        var table = Assert.Single(body.Elements<Table>());
+        var rows = table.Elements<TableRow>().ToList();
+        Assert.Equal(3, rows.Count);
+        Assert.Equal(["Name", "Status", "Notes"], rows[0].Elements<DocumentFormat.OpenXml.Wordprocessing.TableCell>().Select(cell => cell.InnerText));
+        Assert.Equal(["Word", "Ready", "Uses docx"], rows[1].Elements<DocumentFormat.OpenXml.Wordprocessing.TableCell>().Select(cell => cell.InnerText));
+        Assert.Contains(rows[1].Descendants<Run>(), run => run.RunProperties?.Bold is not null && run.InnerText == "Ready");
+        Assert.Contains(rows[1].Descendants<Run>(), run => run.RunProperties?.RunFonts?.Ascii?.Value == "Consolas" && run.InnerText == "docx");
+    }
+
+    [Fact]
     public void Export_PreservesInlineBoldAndCodeRuns()
     {
         var document = new DocumentModel([

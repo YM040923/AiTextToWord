@@ -35,9 +35,9 @@ powershell -ExecutionPolicy Bypass -File .\Install-AiTextToWord.ps1
 如果不使用脚本，可以用管理员 PowerShell 运行：
 
 ```powershell
-Import-Certificate -FilePath ".\AiTextToWord.App_1.0.0.16_x64.cer" -CertStoreLocation Cert:\LocalMachine\Root
-Import-Certificate -FilePath ".\AiTextToWord.App_1.0.0.16_x64.cer" -CertStoreLocation Cert:\LocalMachine\TrustedPeople
-Add-AppxPackage -Path ".\AiTextToWord.App_1.0.0.16_x64.msix" -ForceUpdateFromAnyVersion
+Import-Certificate -FilePath ".\AiTextToWord.App_1.0.0.17_x64.cer" -CertStoreLocation Cert:\LocalMachine\Root
+Import-Certificate -FilePath ".\AiTextToWord.App_1.0.0.17_x64.cer" -CertStoreLocation Cert:\LocalMachine\TrustedPeople
+Add-AppxPackage -Path ".\AiTextToWord.App_1.0.0.17_x64.msix" -ForceUpdateFromAnyVersion
 ```
 
 如果文件名版本不同，请替换为你下载到的实际文件名。
@@ -69,7 +69,7 @@ Get-AppxPackage -Name YM040923.AiTextToWord | Remove-AppxPackage
 可以尝试在开始菜单搜索 `AI 文本转 Word`。如果仍找不到，重新运行：
 
 ```powershell
-Add-AppxPackage -Path ".\AiTextToWord.App_1.0.0.16_x64.msix" -ForceUpdateFromAnyVersion
+Add-AppxPackage -Path ".\AiTextToWord.App_1.0.0.17_x64.msix" -ForceUpdateFromAnyVersion
 ```
 
 ### Windows 阻止运行脚本

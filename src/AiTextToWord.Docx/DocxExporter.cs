@@ -2,6 +2,8 @@ using AiTextToWord.Core.Model;
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
+using ModelTableCell = AiTextToWord.Core.Model.TableCell;
+using WordTableCell = DocumentFormat.OpenXml.Wordprocessing.TableCell;
 
 namespace AiTextToWord.Docx;
 
@@ -33,6 +35,12 @@ public sealed class DocxExporter
 
                 index--;
                 body.Append(BlockQuoteParagraph(quotes));
+                continue;
+            }
+
+            if (block is TableBlock table)
+            {
+                body.Append(WordTable(table));
                 continue;
             }
 
@@ -68,8 +76,76 @@ public sealed class DocxExporter
             BlockQuoteBlock quote => BlockQuoteParagraph([quote]),
             CodeBlock code => ParagraphWithText(code.Code, style: "BlockText", font: "Consolas"),
             DividerBlock => SpacerParagraph(),
+            TableBlock => SpacerParagraph(),
             _ => ParagraphWithText(string.Empty)
         };
+    }
+
+    private static Table WordTable(TableBlock table)
+    {
+        var wordTable = new Table(
+            new TableProperties(
+                new TableWidth { Width = "5000", Type = TableWidthUnitValues.Pct },
+                new TableBorders(
+                    new TopBorder { Val = BorderValues.Single, Size = 4, Color = "D1D5DB" },
+                    new BottomBorder { Val = BorderValues.Single, Size = 4, Color = "D1D5DB" },
+                    new LeftBorder { Val = BorderValues.Single, Size = 4, Color = "D1D5DB" },
+                    new RightBorder { Val = BorderValues.Single, Size = 4, Color = "D1D5DB" },
+                    new InsideHorizontalBorder { Val = BorderValues.Single, Size = 4, Color = "D1D5DB" },
+                    new InsideVerticalBorder { Val = BorderValues.Single, Size = 4, Color = "D1D5DB" }),
+                new TableCellMarginDefault(
+                    new TopMargin { Width = "80", Type = TableWidthUnitValues.Dxa },
+                    new BottomMargin { Width = "80", Type = TableWidthUnitValues.Dxa },
+                    new TableCellLeftMargin { Width = 120, Type = TableWidthValues.Dxa },
+                    new TableCellRightMargin { Width = 120, Type = TableWidthValues.Dxa })));
+
+        wordTable.Append(WordTableRow(table.Headers, isHeader: true));
+        foreach (var row in table.Rows)
+        {
+            wordTable.Append(WordTableRow(row, isHeader: false));
+        }
+
+        return wordTable;
+    }
+
+    private static TableRow WordTableRow(IReadOnlyList<ModelTableCell> cells, bool isHeader)
+    {
+        var row = new TableRow();
+        if (isHeader)
+        {
+            row.Append(new TableRowProperties(new TableHeader()));
+        }
+
+        foreach (var cell in cells)
+        {
+            row.Append(WordTableCell(cell, isHeader));
+        }
+
+        return row;
+    }
+
+    private static WordTableCell WordTableCell(ModelTableCell cell, bool isHeader)
+    {
+        var paragraph = ParagraphWithText(cell.Text, cell.Inlines);
+        if (isHeader)
+        {
+            foreach (var run in paragraph.Elements<Run>())
+            {
+                run.RunProperties ??= new RunProperties();
+                run.RunProperties.Append(new Bold());
+            }
+        }
+
+        return new WordTableCell(
+            new TableCellProperties(
+                new TableCellWidth { Type = TableWidthUnitValues.Auto },
+                new Shading
+                {
+                    Val = ShadingPatternValues.Clear,
+                    Color = "auto",
+                    Fill = isHeader ? "F3F4F6" : "FFFFFF"
+                }),
+            paragraph);
     }
 
     private static void AddNumbering(MainDocumentPart mainPart)
