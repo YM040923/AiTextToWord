@@ -13,15 +13,81 @@ public sealed class MarkdownDocumentParser
 {
     public Model.DocumentModel Parse(string text)
     {
-        var markdown = Markdig.Markdown.Parse(text, ParserPipeline);
+        var normalizedText = NormalizeLooseTableSpacing(text);
+        var markdown = Markdig.Markdown.Parse(normalizedText, ParserPipeline);
         var blocks = new List<Model.DocumentBlock>();
 
         foreach (var block in markdown)
         {
-            AddBlock(block, blocks, isQuote: false, source: text);
+            AddBlock(block, blocks, isQuote: false, source: normalizedText);
         }
 
         return new Model.DocumentModel(blocks);
+    }
+
+    private static string NormalizeLooseTableSpacing(string text)
+    {
+        if (!text.Contains('|', StringComparison.Ordinal))
+        {
+            return text;
+        }
+
+        var lines = text
+            .Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Replace('\r', '\n')
+            .Split('\n');
+        var output = new List<string>(lines.Length);
+
+        for (var index = 0; index < lines.Length; index++)
+        {
+            if (lines[index].Trim().Length == 0
+                && PreviousNonEmptyLineIsTableLine(lines, index)
+                && NextNonEmptyLineIsTableLine(lines, index))
+            {
+                continue;
+            }
+
+            output.Add(lines[index]);
+        }
+
+        return string.Join("\n", output);
+    }
+
+    private static bool PreviousNonEmptyLineIsTableLine(IReadOnlyList<string> lines, int index)
+    {
+        for (var cursor = index - 1; cursor >= 0; cursor--)
+        {
+            var line = lines[cursor].Trim();
+            if (line.Length == 0)
+            {
+                continue;
+            }
+
+            return IsPipeTableLine(line);
+        }
+
+        return false;
+    }
+
+    private static bool NextNonEmptyLineIsTableLine(IReadOnlyList<string> lines, int index)
+    {
+        for (var cursor = index + 1; cursor < lines.Count; cursor++)
+        {
+            var line = lines[cursor].Trim();
+            if (line.Length == 0)
+            {
+                continue;
+            }
+
+            return IsPipeTableLine(line);
+        }
+
+        return false;
+    }
+
+    private static bool IsPipeTableLine(string line)
+    {
+        return line.Count(character => character == '|') >= 2;
     }
 
     private static void AddBlock(Block block, List<Model.DocumentBlock> blocks, bool isQuote, string source)

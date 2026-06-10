@@ -108,6 +108,42 @@ public sealed class MarkdownDocumentParserTests
     }
 
     [Fact]
+    public void Parse_CreatesTableBlocksFromLooseAiMarkdownTables()
+    {
+        var parser = new MarkdownDocumentParser();
+
+        var document = parser.Parse("""
+        这里有三个关键词：
+
+        | 关键词 | 含义 |
+
+        | ------ | ---------------------------- |
+
+        | 污染物进入环境 | 有害物质进入空气、水、土壤等介质 |
+
+        | 超过自净能力 | 环境本来能稀释、降解、转化部分污染物，但超过限度就失控 |
+
+        | 影响健康 | 不一定立刻中毒，也可能是慢性损害、遗传损害、致癌、致畸等 |
+        """);
+
+        Assert.Collection(document.Blocks,
+            block =>
+            {
+                var paragraph = Assert.IsType<ParagraphBlock>(block);
+                Assert.Equal("这里有三个关键词：", paragraph.Text);
+            },
+            block =>
+            {
+                var table = Assert.IsType<TableBlock>(block);
+                Assert.Equal(["关键词", "含义"], table.Headers.Select(cell => cell.Text));
+                Assert.Equal(3, table.Rows.Count);
+                Assert.Equal(["污染物进入环境", "有害物质进入空气、水、土壤等介质"], table.Rows[0].Select(cell => cell.Text));
+                Assert.Equal(["超过自净能力", "环境本来能稀释、降解、转化部分污染物，但超过限度就失控"], table.Rows[1].Select(cell => cell.Text));
+                Assert.Equal(["影响健康", "不一定立刻中毒，也可能是慢性损害、遗传损害、致癌、致畸等"], table.Rows[2].Select(cell => cell.Text));
+            });
+    }
+
+    [Fact]
     public void Parse_StripsCommonInlineMarkdownMarkersFromAiChatText()
     {
         var parser = new MarkdownDocumentParser();
