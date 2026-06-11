@@ -1202,10 +1202,11 @@ public sealed partial class MainWindow : Window
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         }
 
-        AddPreviewTableRow(grid, table.Headers, columnCount, metrics, fontFamily, isHeader: true);
+        var totalRowCount = table.Rows.Count + 1;
+        AddPreviewTableRow(grid, table.Headers, columnCount, metrics, fontFamily, isHeader: true, totalRowCount);
         foreach (var row in table.Rows)
         {
-            AddPreviewTableRow(grid, row, columnCount, metrics, fontFamily, isHeader: false);
+            AddPreviewTableRow(grid, row, columnCount, metrics, fontFamily, isHeader: false, totalRowCount);
         }
 
         return grid;
@@ -1217,7 +1218,8 @@ public sealed partial class MainWindow : Window
         int columnCount,
         PreviewLayoutMetrics metrics,
         string fontFamily,
-        bool isHeader)
+        bool isHeader,
+        int totalRowCount)
     {
         var rowIndex = grid.RowDefinitions.Count;
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -1236,7 +1238,11 @@ public sealed partial class MainWindow : Window
             {
                 Padding = new Thickness(8, 6, 8, 6),
                 BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 209, 213, 219)),
-                BorderThickness = new Thickness(0, 0, columnIndex == columnCount - 1 ? 0 : 1, rowIndex == 0 ? 1 : 0),
+                BorderThickness = new Thickness(
+                    0,
+                    0,
+                    columnIndex == columnCount - 1 ? 0 : 1,
+                    rowIndex == totalRowCount - 1 ? 0 : 1),
                 Background = isHeader ? new SolidColorBrush(Windows.UI.Color.FromArgb(255, 246, 247, 249)) : null,
                 Child = text
             };

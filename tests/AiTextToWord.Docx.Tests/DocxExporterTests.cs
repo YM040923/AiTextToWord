@@ -119,6 +119,9 @@ public sealed class DocxExporterTests
         using var word = WordprocessingDocument.Open(stream, false);
         var body = Assert.IsType<Body>(Assert.IsType<Document>(word.MainDocumentPart!.Document).Body);
         var table = Assert.Single(body.Elements<Table>());
+        var borders = table.GetFirstChild<TableProperties>()?.GetFirstChild<TableBorders>();
+        Assert.NotNull(borders?.InsideHorizontalBorder);
+        Assert.Equal(BorderValues.Single, borders!.InsideHorizontalBorder!.Val!.Value);
         var rows = table.Elements<TableRow>().ToList();
         Assert.Equal(3, rows.Count);
         Assert.Equal(["Name", "Status", "Notes"], rows[0].Elements<DocumentFormat.OpenXml.Wordprocessing.TableCell>().Select(cell => cell.InnerText));
